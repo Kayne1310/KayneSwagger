@@ -17,7 +17,36 @@ class RulesSchemaGenerator
             'required' => []
         ];
 
+        // Group nested rules (e.g., assessment_sets.*.field)
+        $nestedRules = [];
+        $topLevelRules = [];
+
         foreach ($rules as $field => $ruleSet) {
+            if (strpos($field, '.*.') !== false) {
+                // Nested array rule
+                $parts = explode('.*.', $field);
+                $parentField = $parts[0];
+                $nestedField = $parts[1] ?? null;
+
+                if (!isset($nestedRules[$parentField])) {
+                    $nestedRules[$parentField] = [];
+                }
+
+                if ($nestedField) {
+                    $nestedRules[$parentField][$nestedField] = $ruleSet;
+                }
+            } else {
+                $topLevelRules[$field] = $ruleSet;
+            }
+        }
+
+        // Process top-level rules
+        foreach ($topLevelRules as $field => $ruleSet) {
+            // Skip if this field has nested rules (will be processed separately)
+            if (isset($nestedRules[$field])) {
+                continue;
+            }
+
             $fieldRules = is_string($ruleSet) ? explode('|', $ruleSet) : $ruleSet;
             $propertySchema = self::parseRules($fieldRules);
 
@@ -31,6 +60,70 @@ class RulesSchemaGenerator
             // Check required
             if (self::isRequired($fieldRules)) {
                 $schema['required'][] = $field;
+            }
+        }
+
+        // Process nested rules
+        foreach ($nestedRules as $parentField => $nestedFields) {
+            // Check if parent field is array in top-level rules
+            $parentRules = $topLevelRules[$parentField] ?? [];
+            $parentFieldRules = is_string($parentRules) ? explode('|', $parentRules) : $parentRules;
+
+            // Generate schema for nested object
+            $nestedSchema = [
+                'type' => 'object',
+                'properties' => [],
+                'required' => []
+            ];
+
+            foreach ($nestedFields as $nestedField => $nestedRuleSet) {
+                $nestedFieldRules = is_string($nestedRuleSet) ? explode('|', $nestedRuleSet) : $nestedRuleSet;
+                $nestedPropertySchema = self::parseRules($nestedFieldRules);
+
+                // Thêm description từ Property attributes nếu có (format: parentField.nestedField)
+                $nestedPropertyKey = "{$parentField}.{$nestedField}";
+                if (isset($properties[$nestedPropertyKey])) {
+                    $nestedPropertySchema = array_merge($nestedPropertySchema, $properties[$nestedPropertyKey]);
+                }
+
+                $nestedSchema['properties'][$nestedField] = $nestedPropertySchema;
+
+                // Check required
+                if (self::isRequired($nestedFieldRules)) {
+                    $nestedSchema['required'][] = $nestedField;
+                }
+            }
+
+            if (empty($nestedSchema['required'])) {
+                unset($nestedSchema['required']);
+            }
+
+            // Create array schema with nested object items
+            $arraySchema = [
+                'type' => 'array',
+                'items' => $nestedSchema
+            ];
+
+            // Add min/max items if specified in parent rules
+            foreach ($parentFieldRules as $rule) {
+                if (is_string($rule)) {
+                    $ruleParts = explode(':', $rule);
+                    $ruleName = $ruleParts[0];
+                    $ruleParams = isset($ruleParts[1]) ? explode(',', $ruleParts[1]) : [];
+
+                    if ($ruleName === 'min' && isset($ruleParams[0])) {
+                        $arraySchema['minItems'] = (int)$ruleParams[0];
+                    } elseif ($ruleName === 'max' && isset($ruleParams[0])) {
+                        $arraySchema['maxItems'] = (int)$ruleParams[0];
+                    }
+                }
+            }
+
+            $schema['properties'][$parentField] = $arraySchema;
+
+            // Check if parent field is required
+            if (self::isRequired($parentFieldRules)) {
+                $schema['required'][] = $parentField;
             }
         }
 
