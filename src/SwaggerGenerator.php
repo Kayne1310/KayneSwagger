@@ -214,32 +214,41 @@ class SwaggerGenerator
 
             // Nếu là DTO hoặc FormRequestDto
             if (class_exists($typeName) && (is_subclass_of($typeName, BaseDto::class) || is_subclass_of($typeName, FormRequestDto::class))) {
-                // GET request → Query Parameters
-                if (in_array($httpMethod, ['get', 'head', 'options']) && is_subclass_of($typeName, FormRequestDto::class)) {
+                // Xác định request source từ Api attribute hoặc auto-detect
+                $requestSource = $this->determineRequestSource($apiAttr, $httpMethod, $typeName);
+                
+                // Query Parameters
+                if ($requestSource === 'query') {
                     $this->processFormRequestAsQueryParams($operation, $typeName, $apiAttr);
                 }
-                // POST, PUT, PATCH → Request Body
-                elseif (in_array($httpMethod, ['post', 'put', 'patch'])) {
-                    $schemaName = $this->getSchemaName($typeName);
-
-                    // Thêm schema vào components
-                    if (!isset($this->spec['components']['schemas'][$schemaName])) {
-                        $this->spec['components']['schemas'][$schemaName] = SchemaGenerator::generate($typeName);
-                    }
-
+                // Request Body (JSON hoặc Form)
+                elseif (in_array($requestSource, ['body', 'form'])) {
                     // Xác định content type
-                    $contentType = $this->getContentType($apiAttr);
+                    $contentType = $this->getContentType($apiAttr, $requestSource);
 
-                    $operation['requestBody'] = [
-                        'required' => !$type->allowsNull(),
-                        'content' => [
-                            $contentType => [
-                                'schema' => [
-                                    '$ref' => "#/components/schemas/{$schemaName}"
+                    // Nếu là form-data, cần xử lý đặc biệt cho file upload
+                    if ($contentType === 'multipart/form-data' || $contentType === 'application/x-www-form-urlencoded') {
+                        $this->processFormDataRequest($operation, $typeName, $apiAttr, $type);
+                    } else {
+                        // JSON body - dùng schema reference
+                        $schemaName = $this->getSchemaName($typeName);
+
+                        // Thêm schema vào components
+                        if (!isset($this->spec['components']['schemas'][$schemaName])) {
+                            $this->spec['components']['schemas'][$schemaName] = SchemaGenerator::generate($typeName);
+                        }
+
+                        $operation['requestBody'] = [
+                            'required' => !$type->allowsNull(),
+                            'content' => [
+                                $contentType => [
+                                    'schema' => [
+                                        '$ref' => "#/components/schemas/{$schemaName}"
+                                    ]
                                 ]
                             ]
-                        ]
-                    ];
+                        ];
+                    }
                 }
             }
         }
@@ -474,12 +483,48 @@ class SwaggerGenerator
     }
 
     /**
+     * Xác định request source từ Api attribute hoặc auto-detect
+     */
+    private function determineRequestSource(Api $apiAttr, string $httpMethod, string $typeName): string
+    {
+        // 1. Ưu tiên: requestSource từ Api attribute
+        if ($apiAttr->requestSource) {
+            return $apiAttr->requestSource;
+        }
+
+        // 2. Detect từ contentType
+        if ($apiAttr->contentType) {
+            if ($apiAttr->contentType === 'multipart/form-data' || $apiAttr->contentType === 'application/x-www-form-urlencoded') {
+                return 'form';
+            }
+            return 'body';
+        }
+
+        // 3. Auto-detect từ HTTP method và type
+        if (in_array($httpMethod, ['get', 'head', 'options']) && is_subclass_of($typeName, FormRequestDto::class)) {
+            return 'query';
+        }
+
+        if (in_array($httpMethod, ['post', 'put', 'patch'])) {
+            return 'body';
+        }
+
+        return 'body'; // Mặc định
+    }
+
+    /**
      * Lấy content type từ Api attribute hoặc mặc định
      */
-    private function getContentType(Api $apiAttr): string
+    private function getContentType(Api $apiAttr, ?string $requestSource = null): string
     {
+        // Nếu có contentType trong attribute, dùng nó
         if ($apiAttr->contentType) {
             return $apiAttr->contentType;
+        }
+
+        // Nếu requestSource là form, dùng multipart/form-data
+        if ($requestSource === 'form') {
+            return 'multipart/form-data';
         }
 
         return 'application/json'; // Mặc định
@@ -543,6 +588,107 @@ class SwaggerGenerator
             500 => 'Internal Server Error',
             default => 'Response',
         };
+    }
+
+    /**
+     * Xử lý Form Data request (multipart/form-data hoặc x-www-form-urlencoded)
+     * Tự động detect file fields và generate schema đúng
+     */
+    private function processFormDataRequest(array &$operation, string $formRequestClass, Api $apiAttr, $type): void
+    {
+        $schema = SchemaGenerator::generate($formRequestClass);
+        $properties = $schema['properties'] ?? [];
+        $required = $schema['required'] ?? [];
+
+        // Tạo schema cho form data với encoding cho file fields
+        $formSchema = [
+            'type' => 'object',
+            'properties' => [],
+            'required' => $required ?: []
+        ];
+
+        $encoding = [];
+
+        foreach ($properties as $field => $fieldSchema) {
+            $formSchema['properties'][$field] = $fieldSchema;
+
+            // Nếu là file field (format: binary), thêm encoding
+            if (isset($fieldSchema['format']) && $fieldSchema['format'] === 'binary') {
+                $encoding[$field] = [
+                    'contentType' => $this->detectFileContentType($fieldSchema)
+                ];
+            }
+        }
+
+        $contentType = $this->getContentType($apiAttr, 'form');
+
+        $requestBody = [
+            'required' => !$type->allowsNull(),
+            'content' => [
+                $contentType => [
+                    'schema' => $formSchema
+                ]
+            ]
+        ];
+
+        // Thêm encoding nếu có file fields
+        if (!empty($encoding)) {
+            $requestBody['content'][$contentType]['encoding'] = $encoding;
+        }
+
+        $operation['requestBody'] = $requestBody;
+    }
+
+    /**
+     * Detect content type cho file field
+     */
+    private function detectFileContentType(array $fieldSchema): string
+    {
+        // Nếu có mimes trong description, parse nó
+        if (isset($fieldSchema['description'])) {
+            // Tìm mimes:jpg,png hoặc Allowed types: jpg, png
+            if (preg_match('/mimes?:([^,\s]+)/i', $fieldSchema['description'], $matches)) {
+                $mime = trim($matches[1]);
+                return $this->mapMimeToContentType($mime);
+            }
+            if (preg_match('/Allowed types:\s*([^\.]+)/i', $fieldSchema['description'], $matches)) {
+                $mimes = array_map('trim', explode(',', $matches[1]));
+                if (!empty($mimes)) {
+                    return $this->mapMimeToContentType($mimes[0]);
+                }
+            }
+        }
+
+        // Kiểm tra xem có phải image không
+        if (isset($fieldSchema['description']) && stripos($fieldSchema['description'], 'image') !== false) {
+            return 'image/*';
+        }
+
+        return 'application/octet-stream'; // Mặc định
+    }
+
+    /**
+     * Map file extension/mime sang content type
+     */
+    private function mapMimeToContentType(string $mime): string
+    {
+        $map = [
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'pdf' => 'application/pdf',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls' => 'application/vnd.ms-excel',
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'csv' => 'text/csv',
+            'txt' => 'text/plain',
+        ];
+
+        $mime = strtolower(trim($mime));
+        return $map[$mime] ?? 'application/octet-stream';
     }
 
     /**

@@ -303,6 +303,34 @@ class RulesSchemaGenerator
                     case 'image':
                         $schema['type'] = 'string';
                         $schema['format'] = 'binary';
+                        // Thêm description để detect mime types (chỉ nếu chưa có)
+                        if (!isset($schema['description'])) {
+                            if ($ruleName === 'image') {
+                                $schema['description'] = 'Image file';
+                            } else {
+                                $schema['description'] = 'File upload';
+                            }
+                        }
+                        break;
+
+                    case 'mimes':
+                        // Mimes rule: mimes:jpg,png,pdf
+                        if (isset($ruleParams[0]) && !empty($ruleParams[0])) {
+                            $mimes = array_filter($ruleParams); // Remove empty values
+                            if (!empty($mimes)) {
+                                $mimesStr = implode(', ', $mimes);
+                                // Append hoặc set description
+                                if (isset($schema['description'])) {
+                                    $schema['description'] .= ' Allowed types: ' . $mimesStr;
+                                } else {
+                                    $schema['description'] = 'Allowed types: ' . $mimesStr;
+                                }
+                                // Nếu chưa có format, set binary
+                                if (!isset($schema['format'])) {
+                                    $schema['format'] = 'binary';
+                                }
+                            }
+                        }
                         break;
 
                     case 'timezone':
