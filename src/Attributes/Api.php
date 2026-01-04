@@ -15,5 +15,6 @@ class Api
         public ?string $description = null,
         public ?string $responseType = null,
         public ?int $responseCode = null,
+        public ?array $security = null, // Security schemes: ['bearerAuth'] hoặc ['bearerAuth', 'apiKey']
     ) {}
 }

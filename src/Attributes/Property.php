@@ -9,7 +9,7 @@ class Property
 {
     public function __construct(
         public ?string $description = null,
-        public ?string $example = null,
+        public mixed $example = null, // Hỗ trợ string, number, boolean, array, object
         public ?string $format = null,
         public ?int $minimum = null,
         public ?int $maximum = null,

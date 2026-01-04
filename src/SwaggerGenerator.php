@@ -18,7 +18,7 @@ class SwaggerGenerator
             'openapi' => '3.0.0',
             'info' => [
                 'title' => config('swagger.title', 'API Documentation'),
-                'version' => config('swagger.version', '1.0.0'),
+                'version' => config('swagger.version', '2.0.0'),
                 'description' => config('swagger.description', ''),
             ],
             'servers' => [
@@ -27,6 +27,7 @@ class SwaggerGenerator
             'paths' => [],
             'components' => [
                 'schemas' => [],
+                'securitySchemes' => config('swagger.security_schemes', []),
             ],
         ];
     }
@@ -131,6 +132,9 @@ class SwaggerGenerator
                 ];
             }
         }
+
+        // Xử lý Security
+        $this->processSecurity($operation, $apiAttr, $route);
 
         $this->spec['paths'][$path][$httpMethod] = $operation;
     }
@@ -262,6 +266,73 @@ class SwaggerGenerator
     {
         $parts = explode('\\', $className);
         return end($parts);
+    }
+
+    /**
+     * Xử lý Security cho operation
+     */
+    private function processSecurity(array &$operation, Api $apiAttr, $route): void
+    {
+        $security = null;
+
+        // 1. Ưu tiên: Security từ Api attribute
+        if ($apiAttr->security !== null && !empty($apiAttr->security)) {
+            $security = $apiAttr->security;
+        }
+        // 2. Tự động detect từ middleware (nếu enabled)
+        elseif (config('swagger.auto_detect_security', true)) {
+            $security = $this->detectSecurityFromMiddleware($route);
+        }
+        // 3. Global security (nếu có)
+        if ($security === null) {
+            $globalSecurity = config('swagger.global_security', []);
+            if (!empty($globalSecurity)) {
+                $security = $globalSecurity;
+            }
+        }
+
+        // Apply security nếu có
+        if ($security !== null && !empty($security)) {
+            $operation['security'] = array_map(function($scheme) {
+                return [$scheme => []];
+            }, $security);
+        }
+    }
+
+    /**
+     * Tự động detect security từ route middleware
+     */
+    private function detectSecurityFromMiddleware($route): ?array
+    {
+        $middlewareMap = config('swagger.middleware_security_map', []);
+        $middlewares = $route->middleware();
+
+        if (empty($middlewares)) {
+            return null;
+        }
+
+        foreach ($middlewares as $middleware) {
+            // Handle middleware với alias (auth:sanctum) hoặc object
+            $middlewareName = is_string($middleware) ? $middleware : null;
+            
+            if (!$middlewareName) {
+                continue;
+            }
+
+            // Exact match
+            if (isset($middlewareMap[$middlewareName])) {
+                return [$middlewareMap[$middlewareName]];
+            }
+
+            // Partial match (auth, sanctum, jwt, etc.)
+            foreach ($middlewareMap as $key => $scheme) {
+                if (strpos($middlewareName, $key) !== false) {
+                    return [$scheme];
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
