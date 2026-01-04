@@ -146,7 +146,20 @@ class SchemaGenerator
                 return self::generate($typeName);
             }
 
-            return self::mapPhpTypeToOpenApi($typeName);
+            $schema = self::mapPhpTypeToOpenApi($typeName);
+            
+            // Nếu là array và có Property attribute với itemsType
+            if ($schema['type'] === 'array') {
+                $attributes = $property->getAttributes(Property::class);
+                if (!empty($attributes)) {
+                    $attr = $attributes[0]->newInstance();
+                    if ($attr->itemsType) {
+                        $schema['items'] = self::mapPhpTypeToOpenApi($attr->itemsType);
+                    }
+                }
+            }
+            
+            return $schema;
         }
 
         if ($type instanceof ReflectionUnionType) {
@@ -173,11 +186,12 @@ class SchemaGenerator
     private static function mapPhpTypeToOpenApi(string $phpType): array
     {
         return match($phpType) {
-            'int' => ['type' => 'integer'],
-            'float' => ['type' => 'number', 'format' => 'float'],
-            'bool' => ['type' => 'boolean'],
+            'int', 'integer' => ['type' => 'integer'],
+            'float', 'double' => ['type' => 'number', 'format' => 'float'],
+            'bool', 'boolean' => ['type' => 'boolean'],
             'array' => ['type' => 'array', 'items' => ['type' => 'string']],
             'string' => ['type' => 'string'],
+            'object' => ['type' => 'object'],
             default => ['type' => 'string'],
         };
     }

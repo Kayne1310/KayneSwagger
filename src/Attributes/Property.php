@@ -17,6 +17,7 @@ class Property
         public ?int $maxLength = null,
         public ?string $pattern = null,
         public ?array $enum = null,
+        public ?string $itemsType = null, // Type cho array items: 'string', 'integer', 'object', etc.
     ) {}
 
     /**

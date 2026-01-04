@@ -101,13 +101,13 @@ class SwaggerGenerator
         }
 
         // Tự động detect parameters (path, query, body)
-        $this->processParameters($operation, $method, $route, $httpMethod);
+        $this->processParameters($operation, $method, $route, $httpMethod, $apiAttr);
 
         // Response - mặc định 200 nếu không set
         $responseCode = $apiAttr->responseCode ?? 200;
         $operation['responses'] = [
             (string)$responseCode => [
-                'description' => 'Success',
+                'description' => $this->getResponseDescription($responseCode),
                 'content' => [
                     'application/json' => [
                         'schema' => [
@@ -133,6 +133,11 @@ class SwaggerGenerator
             }
         }
 
+        // Tự động thêm error responses cho POST, PUT, PATCH, DELETE
+        if (in_array($httpMethod, ['post', 'put', 'patch', 'delete'])) {
+            $this->addErrorResponses($operation);
+        }
+
         // Xử lý Security
         $this->processSecurity($operation, $apiAttr, $route);
 
@@ -142,12 +147,14 @@ class SwaggerGenerator
     /**
      * Tự động detect và xử lý parameters (thông minh như .NET)
      */
-    private function processParameters(array &$operation, ReflectionMethod $method, $route, string $httpMethod): void
+    private function processParameters(array &$operation, ReflectionMethod $method, $route, string $httpMethod, Api $apiAttr): void
     {
         $parameters = $method->getParameters();
-        $pathParams = $this->extractPathParameters($route->uri());
+        // Extract path params từ Api path (không phải route URI) để match chính xác
+        $pathParams = $this->extractPathParameters($apiAttr->path);
         $operation['parameters'] = [];
 
+        // Xử lý path parameters trước (không phải DTO/FormRequestDto)
         foreach ($parameters as $param) {
             $paramName = $param->getName();
             $type = $param->getType();
@@ -158,27 +165,8 @@ class SwaggerGenerator
 
             $typeName = $type->getName();
 
-            // Nếu là DTO hoặc FormRequestDto → Request Body (cho POST, PUT, PATCH)
+            // Skip DTO/FormRequestDto - sẽ xử lý sau
             if (class_exists($typeName) && (is_subclass_of($typeName, BaseDto::class) || is_subclass_of($typeName, FormRequestDto::class))) {
-                if (in_array($httpMethod, ['post', 'put', 'patch'])) {
-                    $schemaName = $this->getSchemaName($typeName);
-
-                    // Thêm schema vào components
-                    if (!isset($this->spec['components']['schemas'][$schemaName])) {
-                        $this->spec['components']['schemas'][$schemaName] = SchemaGenerator::generate($typeName);
-                    }
-
-                    $operation['requestBody'] = [
-                        'required' => !$type->allowsNull(),
-                        'content' => [
-                            'application/json' => [
-                                'schema' => [
-                                    '$ref' => "#/components/schemas/{$schemaName}"
-                                ]
-                            ]
-                        ]
-                    ];
-                }
                 continue;
             }
 
@@ -193,7 +181,7 @@ class SwaggerGenerator
                 continue;
             }
 
-            // Còn lại → Query Parameter
+            // Còn lại → Query Parameter (chỉ cho primitive types)
             if ($typeName !== 'Illuminate\Http\Request') {
                 $operation['parameters'][] = [
                     'name' => $paramName,
@@ -201,6 +189,49 @@ class SwaggerGenerator
                     'required' => !$type->allowsNull(),
                     'schema' => $this->mapPhpTypeToSchema($typeName),
                 ];
+            }
+        }
+
+        // Xử lý DTO/FormRequestDto sau
+        foreach ($parameters as $param) {
+            $paramName = $param->getName();
+            $type = $param->getType();
+
+            if (!$type instanceof \ReflectionNamedType) {
+                continue;
+            }
+
+            $typeName = $type->getName();
+
+            // Nếu là DTO hoặc FormRequestDto
+            if (class_exists($typeName) && (is_subclass_of($typeName, BaseDto::class) || is_subclass_of($typeName, FormRequestDto::class))) {
+                // GET request → Query Parameters
+                if (in_array($httpMethod, ['get', 'head', 'options']) && is_subclass_of($typeName, FormRequestDto::class)) {
+                    $this->processFormRequestAsQueryParams($operation, $typeName, $apiAttr);
+                }
+                // POST, PUT, PATCH → Request Body
+                elseif (in_array($httpMethod, ['post', 'put', 'patch'])) {
+                    $schemaName = $this->getSchemaName($typeName);
+
+                    // Thêm schema vào components
+                    if (!isset($this->spec['components']['schemas'][$schemaName])) {
+                        $this->spec['components']['schemas'][$schemaName] = SchemaGenerator::generate($typeName);
+                    }
+
+                    // Xác định content type
+                    $contentType = $this->getContentType($apiAttr);
+
+                    $operation['requestBody'] = [
+                        'required' => !$type->allowsNull(),
+                        'content' => [
+                            $contentType => [
+                                'schema' => [
+                                    '$ref' => "#/components/schemas/{$schemaName}"
+                                ]
+                            ]
+                        ]
+                    ];
+                }
             }
         }
 
@@ -300,11 +331,13 @@ class SwaggerGenerator
     }
 
     /**
-     * Tự động detect security từ route middleware
+     * Tự động detect security từ route middleware (bao gồm route group middleware)
      */
     private function detectSecurityFromMiddleware($route): ?array
     {
         $middlewareMap = config('swagger.middleware_security_map', []);
+        
+        // Lấy tất cả middleware từ route (bao gồm cả route group middleware)
         $middlewares = $route->middleware();
 
         if (empty($middlewares)) {
@@ -319,20 +352,129 @@ class SwaggerGenerator
                 continue;
             }
 
-            // Exact match
+            // Exact match (ưu tiên cao nhất)
             if (isset($middlewareMap[$middlewareName])) {
                 return [$middlewareMap[$middlewareName]];
             }
 
-            // Partial match (auth, sanctum, jwt, etc.)
+            // Partial match (auth, sanctum, jwt, token, etc.)
+            // Kiểm tra xem middleware name có chứa key nào trong map không
             foreach ($middlewareMap as $key => $scheme) {
-                if (strpos($middlewareName, $key) !== false) {
+                // Exact match hoặc partial match (token trong token.verify)
+                if ($middlewareName === $key || strpos($middlewareName, $key) !== false) {
                     return [$scheme];
                 }
             }
         }
 
         return null;
+    }
+
+    /**
+     * Xử lý FormRequestDto như Query Parameters (cho GET request)
+     */
+    private function processFormRequestAsQueryParams(array &$operation, string $formRequestClass, Api $apiAttr): void
+    {
+        $schema = SchemaGenerator::generate($formRequestClass);
+        $properties = $schema['properties'] ?? [];
+        $required = $schema['required'] ?? [];
+
+        foreach ($properties as $field => $fieldSchema) {
+            $param = [
+                'name' => $field,
+                'in' => 'query',
+                'required' => in_array($field, $required),
+                'schema' => $fieldSchema,
+            ];
+
+            // Thêm description nếu có
+            if (isset($fieldSchema['description'])) {
+                $param['description'] = $fieldSchema['description'];
+            }
+
+            // Thêm example nếu có
+            if (isset($fieldSchema['example'])) {
+                $param['example'] = $fieldSchema['example'];
+            }
+
+            if (!isset($operation['parameters'])) {
+                $operation['parameters'] = [];
+            }
+
+            $operation['parameters'][] = $param;
+        }
+    }
+
+    /**
+     * Lấy content type từ Api attribute hoặc mặc định
+     */
+    private function getContentType(Api $apiAttr): string
+    {
+        if ($apiAttr->contentType) {
+            return $apiAttr->contentType;
+        }
+
+        return 'application/json'; // Mặc định
+    }
+
+    /**
+     * Thêm error responses tự động
+     */
+    private function addErrorResponses(array &$operation): void
+    {
+        $errorResponses = [
+            '400' => 'Bad Request - Validation error',
+            '401' => 'Unauthorized',
+            '403' => 'Forbidden',
+            '404' => 'Not Found',
+            '422' => 'Unprocessable Entity - Validation error',
+            '500' => 'Internal Server Error',
+        ];
+
+        foreach ($errorResponses as $code => $description) {
+            if (!isset($operation['responses'][$code])) {
+                $operation['responses'][$code] = [
+                    'description' => $description,
+                    'content' => [
+                        'application/json' => [
+                            'schema' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'message' => ['type' => 'string'],
+                                    'errors' => [
+                                        'type' => 'object',
+                                        'additionalProperties' => [
+                                            'type' => 'array',
+                                            'items' => ['type' => 'string']
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ];
+            }
+        }
+    }
+
+    /**
+     * Lấy description cho response code
+     */
+    private function getResponseDescription(int $code): string
+    {
+        return match($code) {
+            200 => 'Success',
+            201 => 'Created',
+            202 => 'Accepted',
+            204 => 'No Content',
+            400 => 'Bad Request',
+            401 => 'Unauthorized',
+            403 => 'Forbidden',
+            404 => 'Not Found',
+            422 => 'Unprocessable Entity',
+            500 => 'Internal Server Error',
+            default => 'Response',
+        };
     }
 
     /**

@@ -92,5 +92,6 @@ return [
         'jwt' => 'bearerAuth',
         'jwt.auth' => 'bearerAuth',
         'sanctum' => 'bearerAuth',
+        'token' => 'bearerAuth', // Tự động detect từ route group
     ],
 ];

@@ -16,5 +16,6 @@ class Api
         public ?string $responseType = null,
         public ?int $responseCode = null,
         public ?array $security = null, // Security schemes: ['bearerAuth'] hoặc ['bearerAuth', 'apiKey']
+        public ?string $contentType = null, // Content type: 'application/json', 'multipart/form-data', 'application/x-www-form-urlencoded'
     ) {}
 }

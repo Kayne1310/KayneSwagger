@@ -17,13 +17,19 @@ class RulesSchemaGenerator
             'required' => []
         ];
 
-        // Group nested rules (e.g., assessment_sets.*.field)
+        // Group nested rules (e.g., assessment_sets.*.field) và array items (e.g., ids.*)
         $nestedRules = [];
+        $arrayItemRules = []; // Array items như ids.* (không có field sau dấu chấm)
         $topLevelRules = [];
 
         foreach ($rules as $field => $ruleSet) {
-            if (strpos($field, '.*.') !== false) {
-                // Nested array rule
+            // Check array items: ids.* (không có field sau dấu chấm)
+            if (preg_match('/^(.+)\.\*$/', $field, $matches)) {
+                $parentField = $matches[1];
+                $arrayItemRules[$parentField] = $ruleSet;
+            }
+            // Check nested object in array: assessment_sets.*.field
+            elseif (strpos($field, '.*.') !== false) {
                 $parts = explode('.*.', $field);
                 $parentField = $parts[0];
                 $nestedField = $parts[1] ?? null;
@@ -42,8 +48,8 @@ class RulesSchemaGenerator
 
         // Process top-level rules
         foreach ($topLevelRules as $field => $ruleSet) {
-            // Skip if this field has nested rules (will be processed separately)
-            if (isset($nestedRules[$field])) {
+            // Skip if this field has nested rules hoặc array item rules (will be processed separately)
+            if (isset($nestedRules[$field]) || isset($arrayItemRules[$field])) {
                 continue;
             }
 
@@ -60,6 +66,49 @@ class RulesSchemaGenerator
             // Check required
             if (self::isRequired($fieldRules)) {
                 $schema['required'][] = $field;
+            }
+        }
+
+        // Process array items (ids.*)
+        foreach ($arrayItemRules as $parentField => $itemRuleSet) {
+            $parentRules = $topLevelRules[$parentField] ?? [];
+            $parentFieldRules = is_string($parentRules) ? explode('|', $parentRules) : $parentRules;
+
+            // Parse rules cho array items
+            $itemRules = is_string($itemRuleSet) ? explode('|', $itemRuleSet) : $itemRuleSet;
+            $itemSchema = self::parseRules($itemRules);
+
+            // Create array schema
+            $arraySchema = [
+                'type' => 'array',
+                'items' => $itemSchema
+            ];
+
+            // Add min/max items if specified in parent rules
+            foreach ($parentFieldRules as $rule) {
+                if (is_string($rule)) {
+                    $ruleParts = explode(':', $rule);
+                    $ruleName = $ruleParts[0];
+                    $ruleParams = isset($ruleParts[1]) ? explode(',', $ruleParts[1]) : [];
+
+                    if ($ruleName === 'min' && isset($ruleParams[0])) {
+                        $arraySchema['minItems'] = (int)$ruleParams[0];
+                    } elseif ($ruleName === 'max' && isset($ruleParams[0])) {
+                        $arraySchema['maxItems'] = (int)$ruleParams[0];
+                    }
+                }
+            }
+
+            // Thêm description từ Property attributes nếu có
+            if (isset($properties[$parentField])) {
+                $arraySchema = array_merge($arraySchema, $properties[$parentField]);
+            }
+
+            $schema['properties'][$parentField] = $arraySchema;
+
+            // Check if parent field is required
+            if (self::isRequired($parentFieldRules)) {
+                $schema['required'][] = $parentField;
             }
         }
 
@@ -228,6 +277,153 @@ class RulesSchemaGenerator
                         if (isset($ruleParams[0])) {
                             $schema['pattern'] = $ruleParams[0];
                         }
+                        break;
+
+                    case 'uuid':
+                        $schema['format'] = 'uuid';
+                        break;
+
+                    case 'ip':
+                        $schema['format'] = 'ipv4';
+                        break;
+
+                    case 'ipv4':
+                        $schema['format'] = 'ipv4';
+                        break;
+
+                    case 'ipv6':
+                        $schema['format'] = 'ipv6';
+                        break;
+
+                    case 'json':
+                        $schema['format'] = 'json';
+                        break;
+
+                    case 'file':
+                    case 'image':
+                        $schema['type'] = 'string';
+                        $schema['format'] = 'binary';
+                        break;
+
+                    case 'timezone':
+                        $schema['format'] = 'timezone';
+                        break;
+
+                    case 'alpha':
+                    case 'alpha_dash':
+                    case 'alpha_num':
+                        // String type với pattern
+                        $schema['type'] = 'string';
+                        if ($ruleName === 'alpha') {
+                            $schema['pattern'] = '^[a-zA-Z]+$';
+                        } elseif ($ruleName === 'alpha_dash') {
+                            $schema['pattern'] = '^[a-zA-Z0-9_-]+$';
+                        } elseif ($ruleName === 'alpha_num') {
+                            $schema['pattern'] = '^[a-zA-Z0-9]+$';
+                        }
+                        break;
+
+                    case 'digits':
+                        if (isset($ruleParams[0])) {
+                            $schema['type'] = 'string';
+                            $schema['pattern'] = '^\d{' . $ruleParams[0] . '}$';
+                        }
+                        break;
+
+                    case 'digits_between':
+                        if (isset($ruleParams[0]) && isset($ruleParams[1])) {
+                            $schema['type'] = 'string';
+                            $schema['pattern'] = '^\d{' . $ruleParams[0] . ',' . $ruleParams[1] . '}$';
+                        }
+                        break;
+
+                    case 'size':
+                        if (isset($ruleParams[0])) {
+                            if ($schema['type'] === 'string') {
+                                $schema['minLength'] = (int)$ruleParams[0];
+                                $schema['maxLength'] = (int)$ruleParams[0];
+                            } else {
+                                $schema['minimum'] = (int)$ruleParams[0];
+                                $schema['maximum'] = (int)$ruleParams[0];
+                            }
+                        }
+                        break;
+
+                    case 'gt':
+                    case 'greater_than':
+                        if (isset($ruleParams[0])) {
+                            if ($schema['type'] === 'string') {
+                                $schema['minLength'] = (int)$ruleParams[0] + 1;
+                            } else {
+                                $schema['minimum'] = (int)$ruleParams[0] + 1;
+                                $schema['exclusiveMinimum'] = true;
+                            }
+                        }
+                        break;
+
+                    case 'gte':
+                    case 'greater_than_or_equal':
+                        if (isset($ruleParams[0])) {
+                            if ($schema['type'] === 'string') {
+                                $schema['minLength'] = (int)$ruleParams[0];
+                            } else {
+                                $schema['minimum'] = (int)$ruleParams[0];
+                            }
+                        }
+                        break;
+
+                    case 'lt':
+                    case 'less_than':
+                        if (isset($ruleParams[0])) {
+                            if ($schema['type'] === 'string') {
+                                $schema['maxLength'] = (int)$ruleParams[0] - 1;
+                            } else {
+                                $schema['maximum'] = (int)$ruleParams[0] - 1;
+                                $schema['exclusiveMaximum'] = true;
+                            }
+                        }
+                        break;
+
+                    case 'lte':
+                    case 'less_than_or_equal':
+                        if (isset($ruleParams[0])) {
+                            if ($schema['type'] === 'string') {
+                                $schema['maxLength'] = (int)$ruleParams[0];
+                            } else {
+                                $schema['maximum'] = (int)$ruleParams[0];
+                            }
+                        }
+                        break;
+
+                    case 'not_in':
+                        // Enum với notIn - không hỗ trợ trực tiếp trong OpenAPI, dùng pattern
+                        if (!empty($ruleParams)) {
+                            $schema['not'] = ['enum' => $ruleParams];
+                        }
+                        break;
+
+                    case 'starts_with':
+                        if (!empty($ruleParams)) {
+                            $schema['type'] = 'string';
+                            $pattern = '^(' . implode('|', array_map('preg_quote', $ruleParams)) . ')';
+                            $schema['pattern'] = $pattern;
+                        }
+                        break;
+
+                    case 'ends_with':
+                        if (!empty($ruleParams)) {
+                            $schema['type'] = 'string';
+                            $pattern = '(' . implode('|', array_map('preg_quote', $ruleParams)) . ')$';
+                            $schema['pattern'] = $pattern;
+                        }
+                        break;
+
+                    case 'string':
+                        $schema['type'] = 'string';
+                        break;
+
+                    case 'nullable':
+                        // Nullable được xử lý ở isRequired
                         break;
                 }
             }

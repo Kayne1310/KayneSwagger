@@ -5,8 +5,13 @@ A minimal, clean Swagger/OpenAPI documentation generator for Laravel using stron
 ##  Features
 
 -  **Type-Safe DTOs**: Use PHP 8.1+ type hints instead of doc comments
+-  **FormRequestDto Support**: Seamlessly integrate existing FormRequest with Swagger
 -  **Minimal Code**: 80% less boilerplate than l5-swagger
 -  **Auto-Validation**: Automatic validation from type definitions
+-  **Auto Security Detection**: Automatically detect JWT/Bearer token from route middleware
+-  **Form Body Support**: Support form-data and x-www-form-urlencoded like .NET
+-  **Query Parameters**: Auto-convert FormRequestDto to query params in GET requests
+-  **Nested Arrays**: Full support for nested arrays and array items
 -  **Clean Syntax**: Modern PHP attributes instead of verbose annotations
 -  **DRY Principle**: Define once, use everywhere
 -  **Like .NET Swagger**: Fast and efficient like .NET Core
@@ -77,6 +82,71 @@ Route::middleware(['dto'])->group(function () {
 
 Visit: `http://your-app.test/api/documentation`
 
+##  Advanced Features
+
+### FormRequestDto - Use Existing FormRequest
+
+```php
+use Kayne\Swagger\FormRequestDto;
+
+class AssessmentSetIndexRequest extends FormRequestDto
+{
+    public function rules(): array
+    {
+        return [
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ];
+    }
+}
+
+// GET request → Auto-convert to query parameters
+#[Api(method: 'GET', path: '/api/assessment-sets', tags: ['Assessment'])]
+public function index(AssessmentSetIndexRequest $request) { }
+```
+
+### Auto Security Detection from Route Group
+
+```php
+// routes/api.php
+Route::group(['middleware' => ['token']], function () {
+    Route::get('/menu-tree', [MenuController::class, 'getMenuTree']);
+});
+
+// Controller - No security parameter needed!
+#[Api(method: 'GET', path: '/api/menu-tree', tags: ['Menu'])]
+public function getMenuTree() { }
+```
+
+→ Automatically adds `bearerAuth` security from middleware `token`!
+
+### Form Body Support
+
+```php
+#[Api(
+    method: 'POST',
+    path: '/api/upload',
+    tags: ['Upload'],
+    contentType: 'multipart/form-data' // or 'application/x-www-form-urlencoded'
+)]
+public function upload(UploadDto $dto) { }
+```
+
+### Array Items Support
+
+```php
+class DestroyRangeRequest extends FormRequestDto
+{
+    public function rules(): array
+    {
+        return [
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['required', 'string'], // Array items
+        ];
+    }
+}
+```
+
 ##  Documentation
 
 See [USAGE.md](USAGE.md) for detailed documentation (Vietnamese).
@@ -129,7 +199,10 @@ public function store(CreateUserDto $dto) { }
 ##  Why Kayne-Swagger?
 
 -  **Minimal**: Only 3 required fields (method, path, tags)
--  **Smart Detection**: Auto-detect request body, path params, query params
+-  **Smart Detection**: Auto-detect request body, path params, query params, security
+-  **FormRequest Support**: Use existing FormRequest without rewriting
+-  **Auto Security**: Automatically detect JWT/Bearer token from route middleware
+-  **Form Body**: Support form-data and x-www-form-urlencoded like .NET
 -  **Less Clutter**: Annotations are optional!
 -  **Type Safety**: Leverages PHP's type system
 -  **Auto-Validation**: Validation rules from types
@@ -153,7 +226,7 @@ public function show(int $id) { }
 #[Api(method: 'GET', path: '/api/users', tags: ['Users'])]
 public function index(?int $page = 1, ?int $limit = 10) { }
 
-// Requpi Attributes (Only 3 Required!)
+##  Api Attributes (Only 3 Required!)
 
 ```php
 #[Api(
@@ -165,7 +238,9 @@ public function index(?int $page = 1, ?int $limit = 10) { }
     summary: 'Short description',         // Optional
     description: 'Detailed description',  // Optional
     responseType: ResponseDto::class,     // Optional
-    responseCode: 201                     // Optional (default: 200)
+    responseCode: 201,                    // Optional (default: 200)
+    security: ['bearerAuth'],            // Optional (auto-detect from middleware)
+    contentType: 'application/json'      // Optional (default: 'application/json')
 )]
 ```
 
@@ -185,15 +260,7 @@ public function index(?int $page = 1, ?int $limit = 10) { }
 )]
 ```
 
-**You can even skip all Property attributes and just use type hints!** method: 'POST|GET|PUT|PATCH|DELETE',
-    path: '/api/path',
-    summary: 'Short description',
-    description: 'Detailed description',
-    tags: ['Tag1', 'Tag2'],
-    responseType: ResponseDto::class,
-    responseCode: 201
-)]
-```
+**You can even skip all Property attributes and just use type hints!**
 
 ##  Configuration
 
@@ -207,9 +274,25 @@ Configure in `.env`:
 
 ```env
 SWAGGER_TITLE="My API"
-SWAGGER_VERSION="1.0.0"
+SWAGGER_VERSION="2.0.0"
 SWAGGER_ROUTE="api/documentation"
 SWAGGER_ENABLED=true
+SWAGGER_AUTO_DETECT_SECURITY=true
+SWAGGER_GLOBAL_SECURITY=bearerAuth
+```
+
+### Security Configuration
+
+Auto-detect middleware names and map to security schemes:
+
+```php
+// config/swagger.php
+'middleware_security_map' => [
+    'token' => 'bearerAuth',      // Auto-detect from route group
+    'auth' => 'bearerAuth',
+    'auth:sanctum' => 'bearerAuth',
+    'jwt' => 'bearerAuth',
+],
 ```
 
 ##  Contributing
