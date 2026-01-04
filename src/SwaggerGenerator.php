@@ -79,7 +79,17 @@ class SwaggerGenerator
             return;
         }
 
-        $apiAttr = $attributes[0]->newInstance();
+        // Handle backward compatibility: try to instantiate with all parameters
+        try {
+            $apiAttr = $attributes[0]->newInstance();
+        } catch (\Error $e) {
+            // Nếu lỗi do unknown parameter (có thể do version cũ), parse arguments manually
+            if (strpos($e->getMessage(), 'Unknown named parameter') !== false) {
+                $apiAttr = $this->createApiAttributeFromArguments($attributes[0]);
+            } else {
+                throw $e;
+            }
+        }
 
         $path = $apiAttr->path;
         $httpMethod = strtolower($apiAttr->method);
@@ -257,6 +267,30 @@ class SwaggerGenerator
         if (empty($operation['parameters'])) {
             unset($operation['parameters']);
         }
+    }
+
+    /**
+     * Tạo Api attribute từ arguments (backward compatibility)
+     * Xử lý trường hợp package cũ không có requestSource parameter
+     */
+    private function createApiAttributeFromArguments($attribute): Api
+    {
+        $args = $attribute->getArguments();
+        
+        // Map arguments theo thứ tự constructor
+        // method, path, tags, summary, description, responseType, responseCode, security, contentType, requestSource
+        return new Api(
+            method: $args['method'] ?? $args[0] ?? '',
+            path: $args['path'] ?? $args[1] ?? '',
+            tags: $args['tags'] ?? $args[2] ?? [],
+            summary: $args['summary'] ?? $args[3] ?? null,
+            description: $args['description'] ?? $args[4] ?? null,
+            responseType: $args['responseType'] ?? $args[5] ?? null,
+            responseCode: $args['responseCode'] ?? $args[6] ?? null,
+            security: $args['security'] ?? $args[7] ?? null,
+            contentType: $args['contentType'] ?? $args[8] ?? null,
+            requestSource: $args['requestSource'] ?? $args[9] ?? null,
+        );
     }
 
     /**
