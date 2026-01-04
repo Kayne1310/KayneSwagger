@@ -171,18 +171,27 @@ class SwaggerGenerator
             }
 
             // Nếu param name match với path parameter → Path Parameter
-            if (in_array($paramName, $pathParams)) {
-                $operation['parameters'][] = [
-                    'name' => $paramName,
+            // Hỗ trợ cả exact match và snake_case <-> camelCase conversion
+            $matchedPathParam = $this->matchPathParameter($paramName, $pathParams);
+            
+            if ($matchedPathParam !== null) {
+                $paramSchema = $this->mapPhpTypeToSchema($typeName);
+                
+                // Sử dụng tên từ path (snake_case) thay vì param name (camelCase)
+                $pathParam = [
+                    'name' => $matchedPathParam,
                     'in' => 'path',
                     'required' => true,
-                    'schema' => $this->mapPhpTypeToSchema($typeName),
+                    'schema' => $paramSchema,
+                    'description' => "The {$matchedPathParam} parameter in path",
                 ];
-                continue;
+                
+                $operation['parameters'][] = $pathParam;
+                continue; // Quan trọng: continue để không xử lý như query parameter
             }
 
-            // Còn lại → Query Parameter (chỉ cho primitive types)
-            if ($typeName !== 'Illuminate\Http\Request') {
+            // Còn lại → Query Parameter (chỉ cho primitive types, và không phải path param)
+            if ($typeName !== 'Illuminate\Http\Request' && $this->matchPathParameter($paramName, $pathParams) === null) {
                 $operation['parameters'][] = [
                     'name' => $paramName,
                     'in' => 'query',
@@ -248,6 +257,65 @@ class SwaggerGenerator
     {
         preg_match_all('/{([^}]+)}/', $uri, $matches);
         return $matches[1] ?? [];
+    }
+
+    /**
+     * Match method parameter với path parameter
+     * Hỗ trợ exact match và snake_case <-> camelCase conversion
+     * 
+     * @param string $paramName Method parameter name (camelCase hoặc snake_case)
+     * @param array $pathParams Path parameters từ URI (snake_case)
+     * @return string|null Tên path parameter nếu match, null nếu không match
+     */
+    private function matchPathParameter(string $paramName, array $pathParams): ?string
+    {
+        // 1. Exact match
+        if (in_array($paramName, $pathParams)) {
+            return $paramName;
+        }
+
+        // 2. Convert camelCase -> snake_case và match
+        $snakeCase = $this->camelToSnake($paramName);
+        if (in_array($snakeCase, $pathParams)) {
+            return $snakeCase;
+        }
+
+        // 3. Convert snake_case -> camelCase và match
+        $camelCase = $this->snakeToCamel($paramName);
+        if (in_array($camelCase, $pathParams)) {
+            return $camelCase;
+        }
+
+        // 4. Check từng path param xem có match không (reverse conversion)
+        foreach ($pathParams as $pathParam) {
+            $pathParamCamel = $this->snakeToCamel($pathParam);
+            if ($pathParamCamel === $paramName) {
+                return $pathParam;
+            }
+            
+            $paramNameSnake = $this->camelToSnake($paramName);
+            if ($paramNameSnake === $pathParam) {
+                return $pathParam;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Convert camelCase to snake_case
+     */
+    private function camelToSnake(string $camel): string
+    {
+        return strtolower(preg_replace('/([a-z])([A-Z])/', '$1_$2', $camel));
+    }
+
+    /**
+     * Convert snake_case to camelCase
+     */
+    private function snakeToCamel(string $snake): string
+    {
+        return lcfirst(str_replace('_', '', ucwords($snake, '_')));
     }
 
     /**
