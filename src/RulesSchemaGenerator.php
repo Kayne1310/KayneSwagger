@@ -53,12 +53,32 @@ class RulesSchemaGenerator
                 continue;
             }
 
+            // Extract description từ rules array nếu có
+            $description = null;
             $fieldRules = is_string($ruleSet) ? explode('|', $ruleSet) : $ruleSet;
+            
+            if (is_array($ruleSet) && isset($ruleSet['description'])) {
+                $description = $ruleSet['description'];
+                // Remove description khỏi rules array để không ảnh hưởng validation
+                $fieldRules = $ruleSet;
+                unset($fieldRules['description']);
+                $fieldRules = array_values($fieldRules); // Re-index để loại bỏ gap
+            }
+            
             $propertySchema = self::parseRules($fieldRules);
 
-            // Thêm description từ Property attributes nếu có
-            if (isset($properties[$field])) {
+            // Thêm description từ rules array (ưu tiên cao hơn Property attributes)
+            if ($description !== null) {
+                $propertySchema['description'] = $description;
+            }
+
+            // Thêm description từ Property attributes nếu có (chỉ khi chưa có từ rules)
+            if (isset($properties[$field]) && !isset($propertySchema['description'])) {
                 $propertySchema = array_merge($propertySchema, $properties[$field]);
+            } elseif (isset($properties[$field])) {
+                // Merge các thuộc tính khác (example, format, etc.) nhưng giữ description từ rules
+                $otherProps = array_diff_key($properties[$field], ['description' => '']);
+                $propertySchema = array_merge($propertySchema, $otherProps);
             }
 
             $schema['properties'][$field] = $propertySchema;
@@ -73,6 +93,15 @@ class RulesSchemaGenerator
         foreach ($arrayItemRules as $parentField => $itemRuleSet) {
             $parentRules = $topLevelRules[$parentField] ?? [];
             $parentFieldRules = is_string($parentRules) ? explode('|', $parentRules) : $parentRules;
+
+            // Extract description từ parent rules nếu có
+            $parentDescription = null;
+            if (is_array($parentRules) && isset($parentRules['description'])) {
+                $parentDescription = $parentRules['description'];
+                $parentFieldRules = $parentRules;
+                unset($parentFieldRules['description']);
+                $parentFieldRules = array_values($parentFieldRules);
+            }
 
             // Parse rules cho array items
             $itemRules = is_string($itemRuleSet) ? explode('|', $itemRuleSet) : $itemRuleSet;
@@ -99,9 +128,18 @@ class RulesSchemaGenerator
                 }
             }
 
-            // Thêm description từ Property attributes nếu có
-            if (isset($properties[$parentField])) {
+            // Thêm description từ parent rules (ưu tiên cao hơn Property attributes)
+            if ($parentDescription !== null) {
+                $arraySchema['description'] = $parentDescription;
+            }
+
+            // Thêm description từ Property attributes nếu có (chỉ khi chưa có từ rules)
+            if (isset($properties[$parentField]) && !isset($arraySchema['description'])) {
                 $arraySchema = array_merge($arraySchema, $properties[$parentField]);
+            } elseif (isset($properties[$parentField])) {
+                // Merge các thuộc tính khác nhưng giữ description từ rules
+                $otherProps = array_diff_key($properties[$parentField], ['description' => '']);
+                $arraySchema = array_merge($arraySchema, $otherProps);
             }
 
             $schema['properties'][$parentField] = $arraySchema;
@@ -126,13 +164,32 @@ class RulesSchemaGenerator
             ];
 
             foreach ($nestedFields as $nestedField => $nestedRuleSet) {
+                // Extract description từ nested rules nếu có
+                $nestedDescription = null;
                 $nestedFieldRules = is_string($nestedRuleSet) ? explode('|', $nestedRuleSet) : $nestedRuleSet;
+                
+                if (is_array($nestedRuleSet) && isset($nestedRuleSet['description'])) {
+                    $nestedDescription = $nestedRuleSet['description'];
+                    $nestedFieldRules = $nestedRuleSet;
+                    unset($nestedFieldRules['description']);
+                    $nestedFieldRules = array_values($nestedFieldRules);
+                }
+                
                 $nestedPropertySchema = self::parseRules($nestedFieldRules);
+
+                // Thêm description từ nested rules (ưu tiên cao hơn Property attributes)
+                if ($nestedDescription !== null) {
+                    $nestedPropertySchema['description'] = $nestedDescription;
+                }
 
                 // Thêm description từ Property attributes nếu có (format: parentField.nestedField)
                 $nestedPropertyKey = "{$parentField}.{$nestedField}";
-                if (isset($properties[$nestedPropertyKey])) {
+                if (isset($properties[$nestedPropertyKey]) && !isset($nestedPropertySchema['description'])) {
                     $nestedPropertySchema = array_merge($nestedPropertySchema, $properties[$nestedPropertyKey]);
+                } elseif (isset($properties[$nestedPropertyKey])) {
+                    // Merge các thuộc tính khác nhưng giữ description từ rules
+                    $otherProps = array_diff_key($properties[$nestedPropertyKey], ['description' => '']);
+                    $nestedPropertySchema = array_merge($nestedPropertySchema, $otherProps);
                 }
 
                 $nestedSchema['properties'][$nestedField] = $nestedPropertySchema;
@@ -270,7 +327,29 @@ class RulesSchemaGenerator
                         break;
 
                     case 'in':
-                        $schema['enum'] = $ruleParams;
+                        // Parse enum values, hỗ trợ boolean strings
+                        $enumValues = [];
+                        foreach ($ruleParams as $param) {
+                            // Convert string boolean to actual boolean
+                            if (strtolower($param) === 'true') {
+                                $enumValues[] = true;
+                            } elseif (strtolower($param) === 'false') {
+                                $enumValues[] = false;
+                            } elseif (is_numeric($param)) {
+                                // Giữ nguyên số nếu là số
+                                $enumValues[] = strpos($param, '.') !== false ? (float)$param : (int)$param;
+                            } else {
+                                $enumValues[] = $param;
+                            }
+                        }
+                        $schema['enum'] = $enumValues;
+                        // Nếu enum chỉ có true/false, set type là boolean (chỉ khi chưa có type hoặc type là string)
+                        if (count($enumValues) === 2 && in_array(true, $enumValues, true) && in_array(false, $enumValues, true)) {
+                            // Chỉ set boolean type nếu chưa có type được set (mặc định là string) hoặc type hiện tại là string
+                            if (!isset($schema['type']) || $schema['type'] === 'string') {
+                                $schema['type'] = 'boolean';
+                            }
+                        }
                         break;
 
                     case 'regex':

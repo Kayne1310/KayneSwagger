@@ -66,12 +66,13 @@ class AssessmentResultHistoryRequestDto extends FormRequestDto
     /**
      * Laravel validation rules - Swagger sẽ tự động đọc từ đây!
      * Hỗ trợ nested arrays: assessment_sets.*.field
+     * Có thể thêm 'description' => '...' vào rules array để set description cho Swagger
      */
     public function rules(): array
     {
         return [
-            'assessment_sets' => ['required', 'array', 'min:1'],
-            'assessment_sets.*.assessment_set_id' => ['required', 'string'],
+            'assessment_sets' => ['required', 'array', 'min:1', 'description' => 'Danh sách các assessment sets'],
+            'assessment_sets.*.assessment_set_id' => ['required', 'string', 'description' => 'ID của bộ đề'],
             'assessment_sets.*.class_assessment_set_id' => ['required', 'string'],
         ];
     }
@@ -133,23 +134,24 @@ public function index(AssessmentSetIndexRequest $request) { }
 // AssessmentSetIndexRequest
 class AssessmentSetIndexRequest extends FormRequestDto
 {
-    #[Property(description: "Page number", example: 1)]
-    public ?int $page = null;
-
-    #[Property(description: "Items per page", example: 10)]
-    public ?int $per_page = null;
-
     public function rules(): array
     {
         return [
-            'page' => ['nullable', 'integer', 'min:1'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1', 'description' => 'Page number'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100', 'description' => 'Items per page'],
+            'status' => ['nullable', 'integer', 'in:0,1', 'description' => 'Status filter'], // Dropdown: 0 hoặc 1
+            'is_active' => ['nullable', 'in:true,false', 'description' => 'Active status'], // Dropdown: true/false
         ];
     }
 }
 ```
 
-Swagger sẽ tự động generate query parameters: `?page=1&per_page=10`
+Swagger sẽ tự động generate query parameters: `?page=1&per_page=10&status=0&is_active=true`
+
+**Lưu ý:**
+- Có thể thêm `'description' => '...'` vào rules array để set description cho Swagger (không cần Property attribute)
+- Sử dụng `in:value1,value2` để tạo dropdown trong Swagger UI (chỉ cho query parameters)
+- `in:true,false` sẽ tự động tạo boolean dropdown
 
 ### Array Items Support
 

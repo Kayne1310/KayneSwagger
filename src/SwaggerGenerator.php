@@ -508,6 +508,12 @@ class SwaggerGenerator
                 $param['example'] = $fieldSchema['example'];
             }
 
+            // Giữ enum để Swagger UI hiển thị dropdown (chỉ cho query parameters, không cho body)
+            if (isset($fieldSchema['enum'])) {
+                // Enum đã được parse trong RulesSchemaGenerator, giữ nguyên
+                // Swagger UI sẽ tự động hiển thị dropdown cho enum
+            }
+
             if (!isset($operation['parameters'])) {
                 $operation['parameters'] = [];
             }
