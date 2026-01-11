@@ -11,6 +11,8 @@ class RulesSchemaGenerator
      */
     public static function fromRules(array $rules, array $properties = []): array
     {
+        // Debug: Log rules để kiểm tra
+        // error_log('RulesSchemaGenerator::fromRules - Input rules: ' . json_encode($rules, JSON_PRETTY_PRINT));
         $schema = [
             'type' => 'object',
             'properties' => [],
@@ -57,12 +59,27 @@ class RulesSchemaGenerator
             $description = null;
             $fieldRules = is_string($ruleSet) ? explode('|', $ruleSet) : $ruleSet;
             
-            if (is_array($ruleSet) && isset($ruleSet['description'])) {
-                $description = $ruleSet['description'];
-                // Remove description khỏi rules array để không ảnh hưởng validation
-                $fieldRules = $ruleSet;
-                unset($fieldRules['description']);
-                $fieldRules = array_values($fieldRules); // Re-index để loại bỏ gap
+            // Check cả numeric keys và string keys để tìm description
+            if (is_array($ruleSet)) {
+                // Check string key 'description'
+                if (isset($ruleSet['description'])) {
+                    $description = $ruleSet['description'];
+                    // Remove description khỏi rules array để không ảnh hưởng validation
+                    $fieldRules = $ruleSet;
+                    unset($fieldRules['description']);
+                    $fieldRules = array_values($fieldRules); // Re-index để loại bỏ gap
+                }
+                // Check nếu description nằm trong array values (edge case)
+                elseif (in_array('description', $ruleSet, true)) {
+                    $descIndex = array_search('description', $ruleSet, true);
+                    if ($descIndex !== false && isset($ruleSet[$descIndex + 1])) {
+                        $description = $ruleSet[$descIndex + 1];
+                        // Remove description và value khỏi rules
+                        $fieldRules = $ruleSet;
+                        unset($fieldRules[$descIndex], $fieldRules[$descIndex + 1]);
+                        $fieldRules = array_values($fieldRules);
+                    }
+                }
             }
             
             $propertySchema = self::parseRules($fieldRules);
