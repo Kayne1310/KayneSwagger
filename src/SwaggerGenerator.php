@@ -143,11 +143,6 @@ class SwaggerGenerator
             }
         }
 
-        // Tự động thêm error responses cho POST, PUT, PATCH, DELETE
-        if (in_array($httpMethod, ['post', 'put', 'patch', 'delete'])) {
-            $this->addErrorResponses($operation);
-        }
-
         // Xử lý Security
         $this->processSecurity($operation, $apiAttr, $route);
 
@@ -568,46 +563,6 @@ class SwaggerGenerator
         }
 
         return 'application/json'; // Mặc định
-    }
-
-    /**
-     * Thêm error responses tự động
-     */
-    private function addErrorResponses(array &$operation): void
-    {
-        $errorResponses = [
-            '400' => 'Bad Request - Validation error',
-            '401' => 'Unauthorized',
-            '403' => 'Forbidden',
-            '404' => 'Not Found',
-            '422' => 'Unprocessable Entity - Validation error',
-            '500' => 'Internal Server Error',
-        ];
-
-        foreach ($errorResponses as $code => $description) {
-            if (!isset($operation['responses'][$code])) {
-                $operation['responses'][$code] = [
-                    'description' => $description,
-                    'content' => [
-                        'application/json' => [
-                            'schema' => [
-                                'type' => 'object',
-                                'properties' => [
-                                    'message' => ['type' => 'string'],
-                                    'errors' => [
-                                        'type' => 'object',
-                                        'additionalProperties' => [
-                                            'type' => 'array',
-                                            'items' => ['type' => 'string']
-                                        ]
-                                    ]
-                                ]
-                            ]
-                        ]
-                    ]
-                ];
-            }
-        }
     }
 
     /**
