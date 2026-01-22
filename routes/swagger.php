@@ -9,4 +9,7 @@ if (config('swagger.enabled', true)) {
 
     Route::get(config('swagger.route', 'api/documentation') . '/spec', [SwaggerController::class, 'spec'])
         ->name('swagger.spec');
+
+    Route::get(config('swagger.route', 'api/documentation') . '/postman', [SwaggerController::class, 'exportPostman'])
+        ->name('swagger.postman');
 }

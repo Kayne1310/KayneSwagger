@@ -285,6 +285,76 @@ SWAGGER_GLOBAL_SECURITY=bearerAuth
 
 Auto-detect middleware names and map to security schemes:
 
+## Auto-Generate Annotations
+
+Use the command to automatically generate `#[Api(...)]` annotations from your routes:
+
+```bash
+php artisan swagger:gen LoginController
+```
+
+Or use full class name:
+
+```bash
+php artisan swagger:gen "App\Http\Controllers\Api\LoginController"
+```
+
+Or use file path:
+
+```bash
+php artisan swagger:gen "app/Http/Controllers/UserController.php"
+```
+
+**Features:**
+- Automatically detects HTTP method, path, and middleware from routes
+- Generates tags from controller name (e.g., `UserController` → `User`)
+- Auto-detects security from middleware (e.g., `auth:sanctum` → `bearerAuth`)
+- Generates summary from method name
+- **Won't overwrite existing annotations** (use `--force` to regenerate)
+
+**Example:**
+
+Before:
+```php
+class ClassController extends Controller
+{
+    public function assignDocuments(AssignDocumentsRequest $request)
+    {
+        // ...
+    }
+}
+```
+
+After running command:
+```php
+class ClassController extends Controller
+{
+    #[Api(
+        method: 'POST',
+        path: '/api/v1/classes/assign-documents',
+        tags: ['Class'],
+        summary: 'Assign documents',
+        security: ['bearerAuth']
+    )]
+    public function assignDocuments(AssignDocumentsRequest $request)
+    {
+        // ...
+    }
+}
+```
+
+**Options:**
+- `--force`: Force regenerate even if annotation exists
+
+**Controller Name Resolution:**
+- Command tự động tìm controller trong các namespace phổ biến:
+  - `App\Http\Controllers\Api\`
+  - `App\Http\Controllers\`
+  - `App\Controllers\Api\`
+  - `App\Controllers\`
+- Có thể dùng tên ngắn: `LoginController` hoặc `Login` (tự động thêm `Controller` suffix)
+- Hoặc dùng full class name: `App\Http\Controllers\Api\LoginController`
+
 ```php
 // config/swagger.php
 'middleware_security_map' => [

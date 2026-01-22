@@ -5,6 +5,7 @@ namespace Kayne\Swagger;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Kayne\Swagger\Middleware\ValidateDto;
+use Kayne\Swagger\Console\Commands\GenerateApiAnnotations;
 
 class SwaggerServiceProvider extends ServiceProvider
 {
@@ -32,6 +33,13 @@ class SwaggerServiceProvider extends ServiceProvider
         // Register middleware
         $router = $this->app['router'];
         $router->aliasMiddleware('dto', ValidateDto::class);
+
+        // Register commands
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                GenerateApiAnnotations::class,
+            ]);
+        }
     }
 
     /**
