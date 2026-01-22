@@ -363,7 +363,7 @@ class ClassController extends Controller
     'auth:sanctum' => 'bearerAuth',
     'jwt' => 'bearerAuth',
 ],
-```
+```\
 
 ##  Contributing
 

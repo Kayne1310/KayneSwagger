@@ -429,10 +429,6 @@ class GenerateApiAnnotations extends Command
         string $annotation,
         bool $replaceExisting = false
     ): string {
-        // Pattern to match Api attribute (multi-line support)
-        // Matches: #[Api(...)] with any content inside, including newlines
-        $apiPattern = '#\[Api\([^)]*(?:\([^)]*\))*\)\]#s';
-        
         // Pattern to match method definition
         $methodPattern = '/(\s*)((?:public|protected|private)\s+function\s+' . preg_quote($methodName) . '\s*\()/';
         
@@ -446,7 +442,9 @@ class GenerateApiAnnotations extends Command
         
         // Check if there's an Api attribute before this method
         $beforeMethod = substr($fileContent, 0, strpos($fileContent, $methodMatches[0]));
-        $hasExisting = preg_match($apiPattern . '\s*$', $beforeMethod);
+        // Check for Api attribute at the end of beforeMethod (with optional whitespace)
+        // Create complete pattern with trailing whitespace check
+        $hasExisting = preg_match('/#\[Api\([^)]*(?:\([^)]*\))*\)\]\s*$/s', $beforeMethod);
 
         if ($hasExisting && !$replaceExisting) {
             // Already has annotation and not forcing replace
