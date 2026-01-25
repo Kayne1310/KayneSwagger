@@ -48,16 +48,66 @@ class SwaggerController extends Controller
     }
 
     /**
+     * Export Postman Environment
+     */
+    public function exportPostmanEnvironment()
+    {
+        $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
+        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost'));
+        $tokenVar = (string) config('swagger.postman.token_variable', 'token');
+        $envName = (string) config('swagger.postman.environment_name', 'Swagger Environment');
+
+        $environment = [
+            'id' => uniqid(),
+            'name' => $envName,
+            'values' => [
+                [
+                    'key' => $baseUrlVar,
+                    'value' => $baseUrlValue,
+                    'enabled' => true,
+                ],
+                [
+                    'key' => $tokenVar,
+                    'value' => '',
+                    'enabled' => true,
+                ],
+            ],
+            '_postman_variable_scope' => 'environment',
+            '_postman_exported_at' => gmdate('c'),
+            '_postman_exported_using' => 'KayneSwagger',
+        ];
+
+        return response()->json($environment)
+            ->header('Content-Disposition', 'attachment; filename="postman-environment.json"');
+    }
+
+    /**
      * Convert OpenAPI spec sang Postman Collection v2.1
      */
     private function convertToPostmanCollection(array $spec, ?string $filterTag = null): array
     {
+        $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
+        $tokenVar = (string) config('swagger.postman.token_variable', 'token');
+        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost'));
+
         $collection = [
             'info' => [
                 '_postman_id' => uniqid(),
                 'name' => $spec['info']['title'] ?? 'API Collection',
                 'description' => $spec['info']['description'] ?? '',
                 'schema' => 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
+            ],
+            'variable' => [
+                [
+                    'key' => $baseUrlVar,
+                    'value' => $baseUrlValue,
+                    'type' => 'string',
+                ],
+                [
+                    'key' => $tokenVar,
+                    'value' => '',
+                    'type' => 'string',
+                ],
             ],
             'item' => [],
         ];
@@ -105,13 +155,19 @@ class SwaggerController extends Controller
      */
     private function convertToPostmanRequest(string $path, string $method, array $operation, array $spec): array
     {
-        $baseUrl = $spec['servers'][0]['url'] ?? '{{base_url}}';
+        $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
+        $tokenVar = (string) config('swagger.postman.token_variable', 'token');
+        $baseUrl = '{{' . $baseUrlVar . '}}';
         
         // Replace path parameters: /users/{id} -> /users/:id
         $postmanPath = preg_replace('/\{([^}]+)\}/', ':$1', $path);
+
+        $rawUrl = rtrim($baseUrl, '/') . '/' . ltrim($postmanPath, '/');
         
         $request = [
-            'name' => $operation['summary'] ?? ucfirst($method) . ' ' . $path,
+            'name' => !empty($operation['summary'])
+                ? $operation['summary']
+                : $this->generatePostmanRequestName($method, $path),
             'request' => [
                 'method' => strtoupper($method),
                 'header' => [
@@ -121,12 +177,20 @@ class SwaggerController extends Controller
                     ],
                 ],
                 'url' => [
-                    'raw' => $baseUrl . $postmanPath,
-                    'host' => [parse_url($baseUrl, PHP_URL_HOST) ?? '{{base_url}}'],
-                    'path' => array_filter(explode('/', $postmanPath)),
+                    // Keep URL minimal to avoid Postman showing "[object Object]"
+                    // Collection should rely on environment variable {{base_url}}
+                    'raw' => $rawUrl,
                 ],
             ],
         ];
+
+        // Add auth header if this operation requires bearerAuth
+        if ($this->postmanNeedsBearerAuth($operation, $spec)) {
+            $request['request']['header'][] = [
+                'key' => 'Authorization',
+                'value' => 'Bearer {{' . $tokenVar . '}}',
+            ];
+        }
 
         // Add description
         if (!empty($operation['description'])) {
@@ -190,6 +254,58 @@ class SwaggerController extends Controller
         }
 
         return $request;
+    }
+
+    private function postmanNeedsBearerAuth(array $operation, array $spec): bool
+    {
+        // Prefer operation-level security; fallback to global spec security
+        $security = $operation['security'] ?? ($spec['security'] ?? null);
+        if ($security === null) {
+            return false;
+        }
+
+        // OpenAPI: security can be [] (explicitly no auth)
+        if (is_array($security) && $security === []) {
+            return false;
+        }
+
+        // If bearerAuth is present in any security requirement object
+        foreach ((array) $security as $req) {
+            if (is_array($req) && array_key_exists('bearerAuth', $req)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function generatePostmanRequestName(string $method, string $path): string
+    {
+        $verb = match (strtoupper($method)) {
+            'GET' => 'Get',
+            'POST' => 'Create',
+            'PUT', 'PATCH' => 'Update',
+            'DELETE' => 'Delete',
+            default => strtoupper($method),
+        };
+
+        $segments = array_values(array_filter(explode('/', trim($path, '/'))));
+        $segments = array_values(array_filter($segments, function ($seg) {
+            if ($seg === 'api') return false;
+            if (preg_match('/^v\d+$/i', $seg)) return false;
+            if (preg_match('/^\{[^}]+\}$/', $seg)) return false;
+            return true;
+        }));
+
+        $tail = array_slice($segments, -3);
+        $namePart = implode(' ', array_map(function ($seg) {
+            $seg = str_replace(['-', '_'], ' ', $seg);
+            $seg = preg_replace('/\s+/', ' ', trim($seg));
+            return $seg;
+        }, $tail));
+
+        $namePart = trim($namePart);
+        return $namePart !== '' ? ($verb . ' ' . ucwords($namePart)) : ($verb . ' ' . $path);
     }
 
     /**

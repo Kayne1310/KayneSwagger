@@ -57,6 +57,9 @@
         <button class="export-btn secondary" onclick="exportByTag()">
             🏷️ Export by Tag
         </button>
+        <button class="export-btn" style="background:#f2994a" onclick="exportPostmanEnvironment()">
+            🌍 Export Postman Environment
+        </button>
     </div>
 
     <div id="swagger-ui"></div>
@@ -95,6 +98,10 @@
         // Export tất cả
         function exportAllPostman() {
             window.open("{{ route('swagger.postman') }}", '_blank');
+        }
+
+        function exportPostmanEnvironment() {
+            window.open("{{ route('swagger.postman.environment') }}", '_blank');
         }
 
         // Export theo tag

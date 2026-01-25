@@ -94,4 +94,27 @@ return [
         'sanctum' => 'bearerAuth',
         'token' => 'bearerAuth', // Tự động detect từ route group
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Postman Export
+    |--------------------------------------------------------------------------
+    | Export OpenAPI spec to Postman collection & environment.
+    |
+    | - Collection will use a variable like {{base_url}} instead of hard-coded localhost
+    | - Environment export provides the actual base_url value from env/config
+    */
+    'postman' => [
+        // Variable name used in collection URL, e.g. {{base_url}}
+        'base_url_variable' => env('SWAGGER_POSTMAN_BASE_URL_VAR', 'base_url'),
+
+        // Default value for base_url in exported Postman environment
+        'base_url' => env('SWAGGER_POSTMAN_BASE_URL', env('APP_URL', 'http://localhost')),
+
+        // Token variable name (optional) used for Authorization: Bearer {{token}}
+        'token_variable' => env('SWAGGER_POSTMAN_TOKEN_VAR', 'token'),
+
+        // Environment file name
+        'environment_name' => env('SWAGGER_POSTMAN_ENV_NAME', env('APP_NAME', 'Laravel') . ' - Swagger'),
+    ],
 ];
