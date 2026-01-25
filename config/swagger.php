@@ -109,10 +109,13 @@ return [
         'base_url_variable' => env('SWAGGER_POSTMAN_BASE_URL_VAR', 'base_url'),
 
         // Default value for base_url in exported Postman environment
-        'base_url' => env('SWAGGER_POSTMAN_BASE_URL', env('APP_URL', 'http://localhost')),
+        'base_url' => env('SWAGGER_POSTMAN_BASE_URL', env('APP_URL', 'http://localhost:8000')),
 
         // Token variable name (optional) used for Authorization: Bearer {{token}}
         'token_variable' => env('SWAGGER_POSTMAN_TOKEN_VAR', 'token'),
+
+        // Default value for token in exported Postman environment (optional)
+        'token' => env('SWAGGER_POSTMAN_TOKEN', ''),
 
         // Environment file name
         'environment_name' => env('SWAGGER_POSTMAN_ENV_NAME', env('APP_NAME', 'Laravel') . ' - Swagger'),

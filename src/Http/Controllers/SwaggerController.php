@@ -36,12 +36,21 @@ class SwaggerController extends Controller
         $spec = $generator->generate();
         
         $tag = $request->get('tag'); // Lọc theo tag nếu có
+        $path = $request->get('path'); // Export 1 endpoint nếu có
+        $method = $request->get('method'); // GET/POST/...
         
-        $collection = $this->convertToPostmanCollection($spec, $tag);
+        $collection = $this->convertToPostmanCollection(
+            $spec,
+            is_string($tag) ? $tag : null,
+            is_string($path) ? $path : null,
+            is_string($method) ? $method : null
+        );
         
-        $filename = $tag 
-            ? "postman-collection-{$tag}.json" 
-            : "postman-collection-all.json";
+        $filename = $this->buildPostmanFilename(
+            is_string($tag) ? $tag : null,
+            is_string($path) ? $path : null,
+            is_string($method) ? $method : null
+        );
         
         return response()->json($collection)
             ->header('Content-Disposition', "attachment; filename=\"{$filename}\"");
@@ -53,8 +62,9 @@ class SwaggerController extends Controller
     public function exportPostmanEnvironment()
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
-        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost'));
+        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost:8000'));
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
+        $tokenValue = (string) config('swagger.postman.token', '');
         $envName = (string) config('swagger.postman.environment_name', 'Swagger Environment');
 
         $environment = [
@@ -68,7 +78,7 @@ class SwaggerController extends Controller
                 ],
                 [
                     'key' => $tokenVar,
-                    'value' => '',
+                    'value' => $tokenValue,
                     'enabled' => true,
                 ],
             ],
@@ -84,11 +94,12 @@ class SwaggerController extends Controller
     /**
      * Convert OpenAPI spec sang Postman Collection v2.1
      */
-    private function convertToPostmanCollection(array $spec, ?string $filterTag = null): array
+    private function convertToPostmanCollection(array $spec, ?string $filterTag = null, ?string $filterPath = null, ?string $filterMethod = null): array
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
-        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost'));
+        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost:8000'));
+        $tokenValue = (string) config('swagger.postman.token', '');
 
         $collection = [
             'info' => [
@@ -105,7 +116,7 @@ class SwaggerController extends Controller
                 ],
                 [
                     'key' => $tokenVar,
-                    'value' => '',
+                    'value' => $tokenValue,
                     'type' => 'string',
                 ],
             ],
@@ -116,7 +127,13 @@ class SwaggerController extends Controller
         $groupedByTag = [];
         
         foreach ($spec['paths'] ?? [] as $path => $methods) {
+            if ($filterPath !== null && $path !== $filterPath) {
+                continue;
+            }
             foreach ($methods as $method => $operation) {
+                if ($filterMethod !== null && strtolower((string) $method) !== strtolower($filterMethod)) {
+                    continue;
+                }
                 $tags = $operation['tags'] ?? ['Default'];
                 
                 foreach ($tags as $tag) {
@@ -148,6 +165,25 @@ class SwaggerController extends Controller
         }
 
         return $collection;
+    }
+
+    private function buildPostmanFilename(?string $tag = null, ?string $path = null, ?string $method = null): string
+    {
+        if ($path !== null) {
+            $m = $method ? strtolower($method) : 'all';
+            $safePath = preg_replace('/[^a-zA-Z0-9\-_]+/', '-', trim($path));
+            $safePath = trim($safePath, '-');
+            $safePath = $safePath !== '' ? $safePath : 'endpoint';
+            return "postman-{$m}-{$safePath}.json";
+        }
+
+        if ($tag) {
+            $safeTag = preg_replace('/[^a-zA-Z0-9\-_]+/', '-', $tag);
+            $safeTag = trim($safeTag, '-');
+            return $safeTag !== '' ? "postman-collection-{$safeTag}.json" : "postman-collection-tag.json";
+        }
+
+        return "postman-collection-all.json";
     }
 
     /**
