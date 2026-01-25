@@ -109,7 +109,19 @@ return [
         'base_url_variable' => env('SWAGGER_POSTMAN_BASE_URL_VAR', 'base_url'),
 
         // Default value for base_url (used when exporting Globals/Environment)
-        'base_url' => env('SWAGGER_POSTMAN_BASE_URL', env('APP_URL', 'http://localhost:8000')),
+        // Default includes "/api" so endpoint URLs can be {{base_url}}/v1/...
+        'base_url' => env(
+            'SWAGGER_POSTMAN_BASE_URL',
+            rtrim(env('APP_URL', 'http://localhost:8000'), '/') . '/api'
+        ),
+
+        // Helper globals to prevent "URL trắng" in Postman UI.
+        // These are derived from base_url, but stored separately because Postman needs parseable components.
+        'protocol_variable' => env('SWAGGER_POSTMAN_PROTOCOL_VAR', 'protocol'),
+        'host_variable' => env('SWAGGER_POSTMAN_HOST_VAR', 'host'),
+        'port_variable' => env('SWAGGER_POSTMAN_PORT_VAR', 'port'),
+        'port_suffix_variable' => env('SWAGGER_POSTMAN_PORT_SUFFIX_VAR', 'port_suffix'),
+        'base_path_variable' => env('SWAGGER_POSTMAN_BASE_PATH_VAR', 'base_path'),
 
         // Token variable name used for Bearer auth: {{token}}
         'token_variable' => env('SWAGGER_POSTMAN_TOKEN_VAR', 'token'),
