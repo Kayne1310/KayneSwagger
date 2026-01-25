@@ -119,7 +119,7 @@ class SwaggerController extends Controller
     public function exportPostmanGlobals()
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
-1        $baseUrlValue = (string) config('swagger.postman.base_url', '');
+        $baseUrlValue = (string) config('swagger.postman.base_url', '');
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
         $tokenValue = (string) config('swagger.postman.token', '');
 
