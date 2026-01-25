@@ -190,21 +190,11 @@ class SwaggerController extends Controller
     private function convertToPostmanCollection(array $spec, ?string $filterTag = null, ?string $filterPath = null, ?string $filterMethod = null): array
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
-        $protocolVar = (string) config('swagger.postman.protocol_variable', 'protocol');
-        $hostVar = (string) config('swagger.postman.host_variable', 'host');
-        $portVar = (string) config('swagger.postman.port_variable', 'port');
-        $portSuffixVar = (string) config('swagger.postman.port_suffix_variable', 'port_suffix');
-        $basePathVar = (string) config('swagger.postman.base_path_variable', 'base_path');
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
 
         // Collection-level variables (single-file import; no Globals/Environment needed)
         $baseUrlDefault = (string) config('swagger.postman.base_url', '');
         $tokenDefault = (string) config('swagger.postman.token', '');
-        $protocolDefault = (string) (parse_url($baseUrlDefault, PHP_URL_SCHEME) ?: '');
-        $hostDefault = (string) (parse_url($baseUrlDefault, PHP_URL_HOST) ?: '');
-        $portDefault = (string) (parse_url($baseUrlDefault, PHP_URL_PORT) ?: '');
-        $portSuffixDefault = $portDefault !== '' ? (':' . $portDefault) : '';
-        $basePathDefault = trim((string) (parse_url($baseUrlDefault, PHP_URL_PATH) ?: ''), '/');
 
         $collection = [
             'info' => [
@@ -216,36 +206,6 @@ class SwaggerController extends Controller
             'variable' => [
                 ['key' => $baseUrlVar, 'value' => $baseUrlDefault, 'type' => 'string'],
                 ['key' => $tokenVar, 'value' => $tokenDefault, 'type' => 'string'],
-                ['key' => $protocolVar, 'value' => $protocolDefault, 'type' => 'string'],
-                ['key' => $hostVar, 'value' => $hostDefault, 'type' => 'string'],
-                ['key' => $portVar, 'value' => $portDefault, 'type' => 'string'],
-                ['key' => $portSuffixVar, 'value' => $portSuffixDefault, 'type' => 'string'],
-                ['key' => $basePathVar, 'value' => $basePathDefault, 'type' => 'string'],
-            ],
-            // Keep helper variables synced from {{base_url}} so Postman UI doesn't show blank URL.
-            'event' => [
-                [
-                    'listen' => 'prerequest',
-                    'script' => [
-                        'type' => 'text/javascript',
-                        'exec' => [
-                            "(function () {",
-                            "  var baseUrl = pm.collectionVariables.get('" . $baseUrlVar . "');",
-                            "  if (!baseUrl) return;",
-                            "  try {",
-                            "    var u = new URL(baseUrl);",
-                            "    pm.collectionVariables.set('" . $protocolVar . "', (u.protocol || 'http:').replace(':',''));",
-                            "    pm.collectionVariables.set('" . $hostVar . "', u.hostname || '');",
-                            "    pm.collectionVariables.set('" . $portVar . "', u.port || '');",
-                            "    pm.collectionVariables.set('" . $portSuffixVar . "', u.port ? (':' + u.port) : '');",
-                            "    pm.collectionVariables.set('" . $basePathVar . "', (u.pathname || '').replace(/^\\/+|\\/+$/g, ''));",
-                            "  } catch (e) {",
-                            "    // ignore invalid base_url",
-                            "  }",
-                            "})();",
-                        ],
-                    ],
-                ],
             ],
             // Global auth (applies to all requests)
             // Token value is stored in collection variable {{token}}
@@ -331,10 +291,6 @@ class SwaggerController extends Controller
     private function convertToPostmanRequest(string $path, string $method, array $operation, array $spec): array
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
-        $protocolVar = (string) config('swagger.postman.protocol_variable', 'protocol');
-        $hostVar = (string) config('swagger.postman.host_variable', 'host');
-        $portVar = (string) config('swagger.postman.port_variable', 'port');
-        $basePathVar = (string) config('swagger.postman.base_path_variable', 'base_path');
         
         // Replace path parameters: /users/{id} -> /users/:id
         $postmanPath = preg_replace('/\{([^}]+)\}/', ':$1', $path);
@@ -349,15 +305,6 @@ class SwaggerController extends Controller
         }
 
         $rawUrl = rtrim('{{' . $baseUrlVar . '}}', '/') . '/' . implode('/', $segmentsWithoutBase);
-
-        // Use helper globals for URL components so Postman UI renders URL correctly
-        $hostParts = ['{{' . $hostVar . '}}'];
-        $pathSegments = array_merge(
-            ['{{' . $basePathVar . '}}'],
-            $segmentsWithoutBase
-        );
-        // Remove empty base_path segment if base_path is empty
-        $pathSegments = array_values(array_filter($pathSegments, fn ($s) => $s !== ''));
         
         $request = [
             'name' => !empty($operation['summary'])
@@ -371,13 +318,8 @@ class SwaggerController extends Controller
                         'value' => 'application/json',
                     ],
                 ],
-                'url' => [
-                    'raw' => $rawUrl,
-                    'protocol' => '{{' . $protocolVar . '}}',
-                    'host' => $hostParts,
-                    'port' => '{{' . $portVar . '}}',
-                    'path' => $pathSegments,
-                ],
+                // Keep URL simple: only {{base_url}} in URL
+                'url' => $rawUrl,
             ],
         ];
 
@@ -386,34 +328,17 @@ class SwaggerController extends Controller
             $request['request']['description'] = $operation['description'];
         }
 
-        // Add path/query parameters
+        // Add query parameters (append to URL string)
         if (!empty($operation['parameters'])) {
-            $pathVariables = [];
-            $queryParams = [];
-            
+            $queryPairs = [];
             foreach ($operation['parameters'] as $param) {
-                if ($param['in'] === 'path') {
-                    $pathVariables[] = [
-                        'key' => $param['name'],
-                        'value' => '',
-                        'description' => $param['description'] ?? '',
-                    ];
-                } elseif ($param['in'] === 'query') {
-                    $queryParams[] = [
-                        'key' => $param['name'],
-                        'value' => '',
-                        'description' => $param['description'] ?? '',
-                        'disabled' => !($param['required'] ?? false),
-                    ];
+                if (($param['in'] ?? null) === 'query' && !empty($param['name'])) {
+                    $queryPairs[] = rawurlencode((string) $param['name']) . '=';
                 }
             }
-            
-            if (!empty($pathVariables)) {
-                $request['request']['url']['variable'] = $pathVariables;
-            }
-            
-            if (!empty($queryParams)) {
-                $request['request']['url']['query'] = $queryParams;
+
+            if (!empty($queryPairs)) {
+                $request['request']['url'] .= (str_contains($request['request']['url'], '?') ? '&' : '?') . implode('&', $queryPairs);
             }
         }
 
