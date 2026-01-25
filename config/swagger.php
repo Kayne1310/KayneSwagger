@@ -105,16 +105,16 @@ return [
     | - Environment export provides the actual base_url value from env/config
     */
     'postman' => [
-        // Variable name used in collection URL, e.g. {{base_url}}
+        // Global variable name used in request URL: {{base_url}}/path
         'base_url_variable' => env('SWAGGER_POSTMAN_BASE_URL_VAR', 'base_url'),
 
-        // Default value for base_url in exported Postman environment
+        // Default value for base_url (used when exporting Globals/Environment)
         'base_url' => env('SWAGGER_POSTMAN_BASE_URL', env('APP_URL', 'http://localhost:8000')),
 
-        // Token variable name (optional) used for Authorization: Bearer {{token}}
+        // Token variable name used for Bearer auth: {{token}}
         'token_variable' => env('SWAGGER_POSTMAN_TOKEN_VAR', 'token'),
 
-        // Default value for token in exported Postman environment (optional)
+        // Default value for token when exporting Globals/Environment (optional)
         'token' => env('SWAGGER_POSTMAN_TOKEN', ''),
 
         // Environment file name
