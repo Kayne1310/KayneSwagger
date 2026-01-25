@@ -139,12 +139,34 @@
 
         // Export tất cả
         function exportAllPostman() {
-            // 1 click: download Globals first (base_url, token), then Collection
-            // Some browsers may block multiple popups; if so, user can open each URL manually.
-            window.open("{{ route('swagger.postman.globals') }}", '_blank');
-            setTimeout(() => {
-                window.open("{{ route('swagger.postman') }}", '_blank');
-            }, 300);
+            // 1 click: download ONE Postman Collection file (contains base_url/token variables)
+            const downloadJson = async (url, fallbackName) => {
+                const res = await fetch(url, { credentials: 'same-origin' });
+                if (!res.ok) throw new Error(`Failed to download ${url}: ${res.status}`);
+
+                const blob = await res.blob();
+
+                // Try to parse filename from Content-Disposition
+                const cd = res.headers.get('content-disposition') || '';
+                const match = cd.match(/filename="([^"]+)"/i);
+                const filename = (match && match[1]) ? match[1] : fallbackName;
+
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+            };
+
+            (async () => {
+                try {
+                    await downloadJson("{{ route('swagger.postman') }}", "postman-collection-all.json");
+                } catch (e) {
+                    alert(e?.message || 'Export failed');
+                }
+            })();
         }
     </script>
 </body>

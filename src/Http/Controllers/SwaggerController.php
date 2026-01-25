@@ -196,8 +196,15 @@ class SwaggerController extends Controller
         $portSuffixVar = (string) config('swagger.postman.port_suffix_variable', 'port_suffix');
         $basePathVar = (string) config('swagger.postman.base_path_variable', 'base_path');
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
-        // base_url/token are intended to be GLOBAL variables (Postman Globals).
-        // Do NOT define them as collection variables, otherwise they override globals.
+
+        // Collection-level variables (single-file import; no Globals/Environment needed)
+        $baseUrlDefault = (string) config('swagger.postman.base_url', '');
+        $tokenDefault = (string) config('swagger.postman.token', '');
+        $protocolDefault = (string) (parse_url($baseUrlDefault, PHP_URL_SCHEME) ?: '');
+        $hostDefault = (string) (parse_url($baseUrlDefault, PHP_URL_HOST) ?: '');
+        $portDefault = (string) (parse_url($baseUrlDefault, PHP_URL_PORT) ?: '');
+        $portSuffixDefault = $portDefault !== '' ? (':' . $portDefault) : '';
+        $basePathDefault = trim((string) (parse_url($baseUrlDefault, PHP_URL_PATH) ?: ''), '/');
 
         $collection = [
             'info' => [
@@ -206,7 +213,16 @@ class SwaggerController extends Controller
                 'description' => $spec['info']['description'] ?? '',
                 'schema' => 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
             ],
-            // Keep helper globals synced from {{base_url}} so Postman UI doesn't show blank URL.
+            'variable' => [
+                ['key' => $baseUrlVar, 'value' => $baseUrlDefault, 'type' => 'string'],
+                ['key' => $tokenVar, 'value' => $tokenDefault, 'type' => 'string'],
+                ['key' => $protocolVar, 'value' => $protocolDefault, 'type' => 'string'],
+                ['key' => $hostVar, 'value' => $hostDefault, 'type' => 'string'],
+                ['key' => $portVar, 'value' => $portDefault, 'type' => 'string'],
+                ['key' => $portSuffixVar, 'value' => $portSuffixDefault, 'type' => 'string'],
+                ['key' => $basePathVar, 'value' => $basePathDefault, 'type' => 'string'],
+            ],
+            // Keep helper variables synced from {{base_url}} so Postman UI doesn't show blank URL.
             'event' => [
                 [
                     'listen' => 'prerequest',
@@ -214,15 +230,15 @@ class SwaggerController extends Controller
                         'type' => 'text/javascript',
                         'exec' => [
                             "(function () {",
-                            "  var baseUrl = pm.globals.get('" . $baseUrlVar . "');",
+                            "  var baseUrl = pm.collectionVariables.get('" . $baseUrlVar . "');",
                             "  if (!baseUrl) return;",
                             "  try {",
                             "    var u = new URL(baseUrl);",
-                            "    pm.globals.set('" . $protocolVar . "', (u.protocol || 'http:').replace(':',''));",
-                            "    pm.globals.set('" . $hostVar . "', u.hostname || 'localhost');",
-                            "    pm.globals.set('" . $portVar . "', u.port || '');",
-                            "    pm.globals.set('" . $portSuffixVar . "', u.port ? (':' + u.port) : '');",
-                            "    pm.globals.set('" . $basePathVar . "', (u.pathname || '').replace(/^\\/+|\\/+$/g, ''));",
+                            "    pm.collectionVariables.set('" . $protocolVar . "', (u.protocol || 'http:').replace(':',''));",
+                            "    pm.collectionVariables.set('" . $hostVar . "', u.hostname || '');",
+                            "    pm.collectionVariables.set('" . $portVar . "', u.port || '');",
+                            "    pm.collectionVariables.set('" . $portSuffixVar . "', u.port ? (':' + u.port) : '');",
+                            "    pm.collectionVariables.set('" . $basePathVar . "', (u.pathname || '').replace(/^\\/+|\\/+$/g, ''));",
                             "  } catch (e) {",
                             "    // ignore invalid base_url",
                             "  }",
