@@ -1,0 +1,74 @@
+{
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "assessment_item_id": {
+                        "type": "string"
+                    },
+                    "position": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "assessment_item_id",
+                    "position"
+                ]
+            }
+        },
+        "setup": {
+            "type": "object",
+            "properties": {
+                "assessmentName": {
+                    "type": "string"
+                },
+                "subjectId": {
+                    "type": "string"
+                },
+                "gradeLevelId": {
+                    "type": "string"
+                },
+                "gradeScaleId": {
+                    "type": "string"
+                },
+                "numberOfQuestion": {
+                    "type": "integer"
+                },
+                "assessmentSetTime": {
+                    "type": "integer"
+                },
+                "difficulty": {
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "assessmentName",
+                "subjectId",
+                "gradeLevelId",
+                "gradeScaleId",
+                "numberOfQuestion",
+                "assessmentSetTime",
+                "difficulty"
+            ]
+        },
+        "meta": {
+            "type": "object",
+            "properties": {
+                "isDraft": {
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "isDraft"
+            ]
+        }
+    },
+    "required": [
+        "questions",
+        "setup",
+        "meta"
+    ]
+}
