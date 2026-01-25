@@ -15,4 +15,7 @@ if (config('swagger.enabled', true)) {
 
     Route::get(config('swagger.route', 'api/documentation') . '/postman/environment', [SwaggerController::class, 'exportPostmanEnvironment'])
         ->name('swagger.postman.environment');
+
+    Route::get(config('swagger.route', 'api/documentation') . '/postman/globals', [SwaggerController::class, 'exportPostmanGlobals'])
+        ->name('swagger.postman.globals');
 }

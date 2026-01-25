@@ -139,7 +139,12 @@
 
         // Export tất cả
         function exportAllPostman() {
-            window.open("{{ route('swagger.postman') }}", '_blank');
+            // 1 click: download Globals first (base_url, token), then Collection
+            // Some browsers may block multiple popups; if so, user can open each URL manually.
+            window.open("{{ route('swagger.postman.globals') }}", '_blank');
+            setTimeout(() => {
+                window.open("{{ route('swagger.postman') }}", '_blank');
+            }, 300);
         }
     </script>
 </body>

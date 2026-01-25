@@ -92,14 +92,47 @@ class SwaggerController extends Controller
     }
 
     /**
+     * Export Postman Globals (workspace-level variables)
+     */
+    public function exportPostmanGlobals()
+    {
+        $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
+        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost:8000'));
+        $tokenVar = (string) config('swagger.postman.token_variable', 'token');
+        $tokenValue = (string) config('swagger.postman.token', '');
+
+        $globals = [
+            'id' => uniqid(),
+            'values' => [
+                [
+                    'key' => $baseUrlVar,
+                    'value' => $baseUrlValue,
+                    'enabled' => true,
+                ],
+                [
+                    'key' => $tokenVar,
+                    'value' => $tokenValue,
+                    'enabled' => true,
+                ],
+            ],
+            '_postman_variable_scope' => 'globals',
+            '_postman_exported_at' => gmdate('c'),
+            '_postman_exported_using' => 'KayneSwagger',
+        ];
+
+        return response()->json($globals)
+            ->header('Content-Disposition', 'attachment; filename="postman-globals.json"');
+    }
+
+    /**
      * Convert OpenAPI spec sang Postman Collection v2.1
      */
     private function convertToPostmanCollection(array $spec, ?string $filterTag = null, ?string $filterPath = null, ?string $filterMethod = null): array
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
-        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost:8000'));
-        $tokenValue = (string) config('swagger.postman.token', '');
+        // base_url/token are intended to be GLOBAL variables (Postman Globals).
+        // Do NOT define them as collection variables, otherwise they override globals.
 
         $collection = [
             'info' => [
@@ -108,16 +141,16 @@ class SwaggerController extends Controller
                 'description' => $spec['info']['description'] ?? '',
                 'schema' => 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
             ],
-            'variable' => [
-                [
-                    'key' => $baseUrlVar,
-                    'value' => $baseUrlValue,
-                    'type' => 'string',
-                ],
-                [
-                    'key' => $tokenVar,
-                    'value' => $tokenValue,
-                    'type' => 'string',
+            // Global auth (applies to all requests)
+            // Token value is stored in collection variable {{token}}
+            'auth' => [
+                'type' => 'bearer',
+                'bearer' => [
+                    [
+                        'key' => 'token',
+                        'value' => '{{' . $tokenVar . '}}',
+                        'type' => 'string',
+                    ],
                 ],
             ],
             'item' => [],
@@ -192,13 +225,13 @@ class SwaggerController extends Controller
     private function convertToPostmanRequest(string $path, string $method, array $operation, array $spec): array
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
-        $tokenVar = (string) config('swagger.postman.token_variable', 'token');
         $baseUrl = '{{' . $baseUrlVar . '}}';
         
         // Replace path parameters: /users/{id} -> /users/:id
         $postmanPath = preg_replace('/\{([^}]+)\}/', ':$1', $path);
 
         $rawUrl = rtrim($baseUrl, '/') . '/' . ltrim($postmanPath, '/');
+        $pathSegments = array_values(array_filter(explode('/', trim($postmanPath, '/'))));
         
         $request = [
             'name' => !empty($operation['summary'])
@@ -213,20 +246,14 @@ class SwaggerController extends Controller
                     ],
                 ],
                 'url' => [
-                    // Keep URL minimal to avoid Postman showing "[object Object]"
-                    // Collection should rely on environment variable {{base_url}}
                     'raw' => $rawUrl,
+                    // Populate components so Postman UI shows the URL correctly
+                    // (When only `raw` is provided, Postman may render URL input as empty)
+                    'host' => ['{{' . $baseUrlVar . '}}'],
+                    'path' => $pathSegments,
                 ],
             ],
         ];
-
-        // Add auth header if this operation requires bearerAuth
-        if ($this->postmanNeedsBearerAuth($operation, $spec)) {
-            $request['request']['header'][] = [
-                'key' => 'Authorization',
-                'value' => 'Bearer {{' . $tokenVar . '}}',
-            ];
-        }
 
         // Add description
         if (!empty($operation['description'])) {
