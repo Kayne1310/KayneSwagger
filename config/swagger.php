@@ -109,11 +109,9 @@ return [
         'base_url_variable' => env('SWAGGER_POSTMAN_BASE_URL_VAR', 'base_url'),
 
         // Default value for base_url (used when exporting Globals/Environment)
-        // Default includes "/api" so endpoint URLs can be {{base_url}}/v1/...
-        'base_url' => env(
-            'SWAGGER_POSTMAN_BASE_URL',
-            rtrim(env('APP_URL', 'http://localhost:8000'), '/') . '/api'
-        ),
+        // Keep empty by default so you can fill it manually in Postman Globals.
+        // Example: http://localhost:8000/api
+        'base_url' => env('SWAGGER_POSTMAN_BASE_URL', ''),
 
         // Helper globals to prevent "URL trắng" in Postman UI.
         // These are derived from base_url, but stored separately because Postman needs parseable components.

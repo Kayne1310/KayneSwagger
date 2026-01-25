@@ -119,7 +119,7 @@ class SwaggerController extends Controller
     public function exportPostmanGlobals()
     {
         $baseUrlVar = (string) config('swagger.postman.base_url_variable', 'base_url');
-        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost:8000'));
+1        $baseUrlValue = (string) config('swagger.postman.base_url', '');
         $tokenVar = (string) config('swagger.postman.token_variable', 'token');
         $tokenValue = (string) config('swagger.postman.token', '');
 
@@ -129,9 +129,9 @@ class SwaggerController extends Controller
         $portSuffixVar = (string) config('swagger.postman.port_suffix_variable', 'port_suffix');
         $basePathVar = (string) config('swagger.postman.base_path_variable', 'base_path');
 
-        // Derive helper defaults from base_url (user only needs to change base_url)
-        $protocolValue = (string) (parse_url($baseUrlValue, PHP_URL_SCHEME) ?: 'http');
-        $hostValue = (string) (parse_url($baseUrlValue, PHP_URL_HOST) ?: 'localhost');
+        // Derive helper defaults from base_url (safe even if base_url is empty)
+        $protocolValue = (string) (parse_url($baseUrlValue, PHP_URL_SCHEME) ?: '');
+        $hostValue = (string) (parse_url($baseUrlValue, PHP_URL_HOST) ?: '');
         $portValue = (string) (parse_url($baseUrlValue, PHP_URL_PORT) ?: '');
         $portSuffixValue = $portValue !== '' ? (':' . $portValue) : '';
         $basePathValue = trim((string) (parse_url($baseUrlValue, PHP_URL_PATH) ?: ''), '/');
@@ -323,15 +323,13 @@ class SwaggerController extends Controller
         // Replace path parameters: /users/{id} -> /users/:id
         $postmanPath = preg_replace('/\{([^}]+)\}/', ':$1', $path);
 
-        // If base_url already contains a base path (default: /api),
-        // remove that prefix from endpoint path to avoid {{base_url}}/api/api/...
-        $baseUrlValue = (string) config('swagger.postman.base_url', config('app.url', 'http://localhost:8000'));
-        $basePathSegments = array_values(array_filter(explode('/', trim((string) (parse_url($baseUrlValue, PHP_URL_PATH) ?: ''), '/'))));
         $endpointSegments = array_values(array_filter(explode('/', trim($postmanPath, '/'))));
 
+        // Common Laravel pattern: routes start with /api/...
+        // If your Postman base_url includes "/api", strip leading "api" from endpoint path.
         $segmentsWithoutBase = $endpointSegments;
-        if (!empty($basePathSegments) && array_slice($endpointSegments, 0, count($basePathSegments)) === $basePathSegments) {
-            $segmentsWithoutBase = array_slice($endpointSegments, count($basePathSegments));
+        if (!empty($segmentsWithoutBase) && $segmentsWithoutBase[0] === 'api') {
+            $segmentsWithoutBase = array_slice($segmentsWithoutBase, 1);
         }
 
         $rawUrl = rtrim('{{' . $baseUrlVar . '}}', '/') . '/' . implode('/', $segmentsWithoutBase);
