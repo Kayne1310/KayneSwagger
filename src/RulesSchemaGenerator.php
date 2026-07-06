@@ -26,38 +26,27 @@ class RulesSchemaGenerator
         $topLevelRules = [];
 
         foreach ($rules as $field => $ruleSet) {
-            // Check array items: ids.* (không có field sau dấu chấm)
-            if (preg_match('/^(.+)\.\*$/', $field, $matches)) {
+            // Find the first delimiter (.* or .)
+            if (preg_match('/^([^\.]+)\.\*(?:\.(.+))?$/', $field, $matches)) {
                 $parentField = $matches[1];
-                $arrayItemRules[$parentField] = $ruleSet;
-            }
-            // Check nested object in array: assessment_sets.*.field
-            elseif (strpos($field, '.*.') !== false) {
-                $parts = explode('.*.', $field);
-                $parentField = $parts[0];
-                $nestedField = $parts[1] ?? null;
-
-                if (!isset($nestedRules[$parentField])) {
-                    $nestedRules[$parentField] = [];
-                }
-
-                if ($nestedField) {
+                $nestedField = $matches[2] ?? null;
+                
+                if ($nestedField === null) {
+                    $arrayItemRules[$parentField] = $ruleSet;
+                } else {
+                    if (!isset($nestedRules[$parentField])) {
+                        $nestedRules[$parentField] = [];
+                    }
                     $nestedRules[$parentField][$nestedField] = $ruleSet;
                 }
-            }
-            // Check nested object (single): setup.assessmentName (có . nhưng không có *)
-            elseif (strpos($field, '.') !== false) {
-                $parts = explode('.', $field, 2);
-                $parentField = $parts[0];
-                $nestedField = $parts[1] ?? null;
-
+            } elseif (preg_match('/^([^\.]+)\.(.+)$/', $field, $matches)) {
+                $parentField = $matches[1];
+                $nestedField = $matches[2];
+                
                 if (!isset($nestedObjectRules[$parentField])) {
                     $nestedObjectRules[$parentField] = [];
                 }
-
-                if ($nestedField) {
-                    $nestedObjectRules[$parentField][$nestedField] = $ruleSet;
-                }
+                $nestedObjectRules[$parentField][$nestedField] = $ruleSet;
             } else {
                 $topLevelRules[$field] = $ruleSet;
             }
@@ -188,52 +177,20 @@ class RulesSchemaGenerator
             $parentRules = $topLevelRules[$parentField] ?? [];
             $parentFieldRules = is_string($parentRules) ? explode('|', $parentRules) : $parentRules;
 
-            // Generate schema for nested object
-            $nestedSchema = [
-                'type' => 'object',
-                'properties' => [],
-                'required' => []
-            ];
-
-            foreach ($nestedFields as $nestedField => $nestedRuleSet) {
-                // Extract description từ nested rules nếu có
-                $nestedDescription = null;
-                $nestedFieldRules = is_string($nestedRuleSet) ? explode('|', $nestedRuleSet) : $nestedRuleSet;
-                
-                if (is_array($nestedRuleSet) && isset($nestedRuleSet['description'])) {
-                    $nestedDescription = $nestedRuleSet['description'];
-                    $nestedFieldRules = $nestedRuleSet;
-                    unset($nestedFieldRules['description']);
-                    $nestedFieldRules = array_values($nestedFieldRules);
-                }
-                
-                $nestedPropertySchema = self::parseRules($nestedFieldRules);
-
-                // Thêm description từ nested rules (ưu tiên cao hơn Property attributes)
-                if ($nestedDescription !== null) {
-                    $nestedPropertySchema['description'] = $nestedDescription;
-                }
-
-                // Thêm description từ Property attributes nếu có (format: parentField.nestedField)
-                $nestedPropertyKey = "{$parentField}.{$nestedField}";
-                if (isset($properties[$nestedPropertyKey]) && !isset($nestedPropertySchema['description'])) {
-                    $nestedPropertySchema = array_merge($nestedPropertySchema, $properties[$nestedPropertyKey]);
-                } elseif (isset($properties[$nestedPropertyKey])) {
-                    // Merge các thuộc tính khác nhưng giữ description từ rules
-                    $otherProps = array_diff_key($properties[$nestedPropertyKey], ['description' => '']);
-                    $nestedPropertySchema = array_merge($nestedPropertySchema, $otherProps);
-                }
-
-                $nestedSchema['properties'][$nestedField] = $nestedPropertySchema;
-
-                // Check required
-                if (self::isRequired($nestedFieldRules)) {
-                    $nestedSchema['required'][] = $nestedField;
+            // Generate schema for nested object by recursive call
+            $nestedProperties = [];
+            foreach ($properties as $propKey => $propVal) {
+                if (strpos($propKey, $parentField . '.') === 0) {
+                    $nestedProperties[substr($propKey, strlen($parentField) + 1)] = $propVal;
                 }
             }
-
-            if (empty($nestedSchema['required'])) {
-                unset($nestedSchema['required']);
+            $nestedSchema = self::fromRules($nestedFields, $nestedProperties);
+            
+            if (empty($nestedSchema['properties'])) {
+                $nestedSchema = [
+                    'type' => 'object',
+                    'properties' => new \stdClass()
+                ];
             }
 
             // Create array schema with nested object items
@@ -285,52 +242,20 @@ class RulesSchemaGenerator
                 $parentFieldRules = array_values($parentFieldRules);
             }
 
-            // Generate schema for nested object
-            $nestedSchema = [
-                'type' => 'object',
-                'properties' => [],
-                'required' => []
-            ];
-
-            foreach ($nestedFields as $nestedField => $nestedRuleSet) {
-                // Extract description từ nested rules nếu có
-                $nestedDescription = null;
-                $nestedFieldRules = is_string($nestedRuleSet) ? explode('|', $nestedRuleSet) : $nestedRuleSet;
-                
-                if (is_array($nestedRuleSet) && isset($nestedRuleSet['description'])) {
-                    $nestedDescription = $nestedRuleSet['description'];
-                    $nestedFieldRules = $nestedRuleSet;
-                    unset($nestedFieldRules['description']);
-                    $nestedFieldRules = array_values($nestedFieldRules);
-                }
-                
-                $nestedPropertySchema = self::parseRules($nestedFieldRules);
-
-                // Thêm description từ nested rules (ưu tiên cao hơn Property attributes)
-                if ($nestedDescription !== null) {
-                    $nestedPropertySchema['description'] = $nestedDescription;
-                }
-
-                // Thêm description từ Property attributes nếu có (format: parentField.nestedField)
-                $nestedPropertyKey = "{$parentField}.{$nestedField}";
-                if (isset($properties[$nestedPropertyKey]) && !isset($nestedPropertySchema['description'])) {
-                    $nestedPropertySchema = array_merge($nestedPropertySchema, $properties[$nestedPropertyKey]);
-                } elseif (isset($properties[$nestedPropertyKey])) {
-                    // Merge các thuộc tính khác nhưng giữ description từ rules
-                    $otherProps = array_diff_key($properties[$nestedPropertyKey], ['description' => '']);
-                    $nestedPropertySchema = array_merge($nestedPropertySchema, $otherProps);
-                }
-
-                $nestedSchema['properties'][$nestedField] = $nestedPropertySchema;
-
-                // Check required
-                if (self::isRequired($nestedFieldRules)) {
-                    $nestedSchema['required'][] = $nestedField;
+            // Generate schema for nested object by recursive call
+            $nestedProperties = [];
+            foreach ($properties as $propKey => $propVal) {
+                if (strpos($propKey, $parentField . '.') === 0) {
+                    $nestedProperties[substr($propKey, strlen($parentField) + 1)] = $propVal;
                 }
             }
-
-            if (empty($nestedSchema['required'])) {
-                unset($nestedSchema['required']);
+            $nestedSchema = self::fromRules($nestedFields, $nestedProperties);
+            
+            if (empty($nestedSchema['properties'])) {
+                $nestedSchema = [
+                    'type' => 'object',
+                    'properties' => new \stdClass()
+                ];
             }
 
             // Add description from parent rules if exists
